@@ -3,6 +3,7 @@
  */
 import React, { createContext, useState, useEffect, useCallback, ReactNode } from 'react';
 import { API_BASE_URL } from '../config';
+import { getToken, setToken, removeToken } from '../utils/api';
 
 export interface User {
   id: string;
@@ -56,14 +57,26 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
 
   // 检查认证状态
   const checkAuth = useCallback(async () => {
+    const token = getToken();
+    if (!token) {
+      setUser(null);
+      setIsLoading(false);
+      return;
+    }
+
     try {
-      const response = await fetch(`${API_BASE_URL}/api/auth/me`);
+      const headers: Record<string, string> = {
+        'Content-Type': 'application/json',
+        'Authorization': `Bearer ${token}`
+      };
+      const response = await fetch(`${API_BASE_URL}/api/auth/me`, { headers });
       const data = await response.json();
       
       if (data.success && data.user) {
         setUser(data.user);
       } else {
         setUser(null);
+        removeToken();
       }
     } catch (error) {
       console.error('检查认证状态失败:', error);
@@ -78,16 +91,14 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
     try {
       const response = await fetch(`${API_BASE_URL}/api/auth/login`, {
         method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
+        headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ username, password }),
-        credentials: 'include',
       });
       
       const data = await response.json();
       
-      if (data.success && data.user) {
+      if (data.success && data.token) {
+        setToken(data.token);
         setUser(data.user);
         return { success: true };
       } else {
@@ -101,16 +112,8 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
 
   // 登出
   const logout = useCallback(async () => {
-    try {
-      await fetch(`${API_BASE_URL}/api/auth/logout`, {
-        method: 'POST',
-        credentials: 'include',
-      });
-    } catch (error) {
-      console.error('登出失败:', error);
-    } finally {
-      setUser(null);
-    }
+    removeToken();
+    setUser(null);
   }, []);
 
   // 初始化
