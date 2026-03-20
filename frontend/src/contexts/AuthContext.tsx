@@ -69,7 +69,7 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
         'Content-Type': 'application/json',
         'Authorization': `Bearer ${token}`
       };
-      const response = await fetch(`${API_BASE_URL}/api/auth/me`, { headers });
+      const response = await fetch(`${API_BASE_URL}/api/auth/protected/me`, { headers });
       const data = await response.json();
       
       if (data.success && data.user) {
@@ -100,6 +100,7 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
       if (data.success && data.token) {
         setToken(data.token);
         setUser(data.user);
+        setIsLoading(false);
         return { success: true };
       } else {
         return { success: false, error: data.error || '登录失败' };
@@ -118,12 +119,17 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
 
   // 初始化
   useEffect(() => {
-    const init = async () => {
-      await checkNeedsSetup();
-      await checkAuth();
-    };
-    init();
-  }, [checkNeedsSetup, checkAuth]);
+    checkNeedsSetup();
+  }, [checkNeedsSetup]);
+
+  // 检查认证状态（仅在 needsSetup 完成后）
+  useEffect(() => {
+    if (!needsSetup) {
+      checkAuth();
+    } else {
+      setIsLoading(false);
+    }
+  }, [needsSetup, checkAuth]);
 
   return (
     <AuthContext.Provider

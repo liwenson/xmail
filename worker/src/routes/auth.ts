@@ -87,7 +87,7 @@ auth.post('/setup', async (c) => {
     
     // 生成 JWT
     const secret = getJWTSecret(c.env);
-    const token = createJWT({
+    const token = await createJWT({
       sub: user.id,
       username: user.username,
       role: user.role,
@@ -148,7 +148,7 @@ auth.post('/login', async (c) => {
     
     // 生成 JWT
     const secret = getJWTSecret(c.env);
-    const token = createJWT({
+    const token = await createJWT({
       sub: user.id,
       username: user.username,
       role: user.role,
@@ -175,45 +175,6 @@ auth.post('/login', async (c) => {
 // 用户登出
 auth.post('/logout', async (c) => {
   return c.json({ success: true });
-});
-
-// 获取当前用户信息
-auth.get('/me', async (c) => {
-  try {
-    const user = c.get('user');
-    
-    if (!user) {
-      return c.json({ 
-        success: false, 
-        error: '未登录' 
-      }, 401);
-    }
-    
-    // 从数据库获取完整用户信息
-    const fullUser = await getUserById(c.env.DB, user.sub);
-    
-    if (!fullUser) {
-      return c.json({ 
-        success: false, 
-        error: '用户不存在' 
-      }, 404);
-    }
-    
-    return c.json({
-      success: true,
-      user: {
-        id: fullUser.id,
-        username: fullUser.username,
-        role: fullUser.role,
-      }
-    });
-  } catch (error) {
-    console.error('获取用户信息失败:', error);
-    return c.json({ 
-      success: false, 
-      error: '获取用户信息失败' 
-    }, 500);
-  }
 });
 
 export default auth;

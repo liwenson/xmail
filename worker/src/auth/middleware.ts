@@ -51,23 +51,31 @@ export async function authMiddleware(c: Context, next: Next) {
   const env = c.env as Env;
   const path = new URL(c.req.url).pathname;
   
+  console.log('authMiddleware called for path:', path);
+  
   // 公开路径直接通过
   if (PUBLIC_PATHS.some(p => path === p || path.startsWith(p + '/'))) {
+    console.log('Public path, skipping auth');
     return next();
   }
   
   // 提取 token
   const token = extractToken(c.req.raw);
+  console.log('Extracted token:', token ? 'exists' : 'null');
   
   if (!token) {
+    console.log('No token found');
     return c.json({ success: false, error: '未登录，请先登录' }, 401);
   }
   
   // 验证 token
   const secret = getJWTSecret(env);
-  const payload = verifyJWT(token, secret);
+  console.log('Secret:', secret);
+  const payload = await verifyJWT(token, secret);
+  console.log('JWT payload:', payload);
   
   if (!payload) {
+    console.log('Token verification failed');
     return c.json({ success: false, error: 'Token 已过期，请重新登录' }, 401);
   }
   

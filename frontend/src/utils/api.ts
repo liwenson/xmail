@@ -31,7 +31,7 @@ const getAuthHeaders = (): Record<string, string> => {
 // 获取认证用户信息
 export const getCurrentUser = async () => {
   try {
-    const response = await fetch(apiUrl('/api/auth/me'), {
+    const response = await fetch(apiUrl('/api/auth/protected/me'), {
       headers: getAuthHeaders(),
     });
     const data = await response.json();

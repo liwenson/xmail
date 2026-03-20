@@ -35,8 +35,39 @@ app.use('/*', cors({
   maxAge: 86400,
 }));
 
-// 挂载认证路由（不需要认证）
+// 挂载认证路由（需要认证的路由单独处理）
 app.route('/api/auth', authRoutes);
+
+// 对需要认证的 auth 路由应用中间件
+const authProtected = new Hono<{ Bindings: Env }>();
+
+// 添加日志中间件来调试
+authProtected.use('/*', async (c, next) => {
+  console.log('authProtected middleware called for:', c.req.path);
+  await next();
+});
+
+authProtected.use('/*', authMiddleware);
+authProtected.get('/me', async (c) => {
+  console.log('/me handler called, user:', c.get('user'));
+  const user = c.get('user');
+  if (!user) {
+    return c.json({ success: false, error: '未登录' }, 401);
+  }
+  const fullUser = await getUserById(c.env.DB, user.sub);
+  if (!fullUser) {
+    return c.json({ success: false, error: '用户不存在' }, 404);
+  }
+  return c.json({
+    success: true,
+    user: {
+      id: fullUser.id,
+      username: fullUser.username,
+      role: fullUser.role,
+    }
+  });
+});
+app.route('/api/auth/protected', authProtected);
 
 // 健康检查端点
 app.get('/', (c) => {
