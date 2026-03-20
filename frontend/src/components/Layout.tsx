@@ -9,7 +9,7 @@ import InfoModal from './InfoModal'; // 导入弹窗组件
 
 const Layout: React.FC = () => {
   const { t } = useTranslation();
-  const { mailbox, setMailbox, isLoading } = useContext(MailboxContext);
+  const { currentMailbox: mailbox, setCurrentMailbox: setMailbox, isLoading } = useContext(MailboxContext);
   const location = useLocation();
   
   // 添加状态来管理弹窗的显示和内容

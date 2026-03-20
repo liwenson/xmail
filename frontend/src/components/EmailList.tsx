@@ -17,7 +17,7 @@ const EmailList: React.FC<EmailListProps> = ({
   isLoading 
 }) => {
   const { t } = useTranslation();
-  const { autoRefresh, setAutoRefresh, refreshEmails, mailbox, deleteMailbox } = useContext(MailboxContext);
+  const { autoRefresh, setAutoRefresh, refreshEmails, currentMailbox: mailbox, deleteMailbox } = useContext(MailboxContext);
   const [isDeleting, setIsDeleting] = useState(false);
   
   const formatDate = (timestamp: number) => {
@@ -71,10 +71,11 @@ const EmailList: React.FC<EmailListProps> = ({
   };
   
   const handleDeleteMailbox = async () => {
+    if (!mailbox) return;
     if (window.confirm(t('mailbox.confirmDelete'))) {
       setIsDeleting(true);
       try {
-        await deleteMailbox();
+        await deleteMailbox(mailbox.address);
       } catch (error) {
         console.error('Error deleting mailbox:', error);
       } finally {

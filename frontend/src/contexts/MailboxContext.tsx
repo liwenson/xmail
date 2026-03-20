@@ -2,7 +2,7 @@
  * 邮箱状态管理
  */
 import React, { createContext, useState, useEffect, useCallback, ReactNode, useContext } from 'react';
-import { useAuthContext } from '../contexts/AuthContext';
+import { AuthContext } from '../contexts/AuthContext';
 import {
   getMailboxes,
   createRandomMailbox,
@@ -50,6 +50,7 @@ interface MailboxContextType {
   successMessage: string | null;
   showSuccessMessage: (message: string) => void;
   showErrorMessage: (message: string) => void;
+  handleMailboxNotFound: () => Promise<void>;
 }
 
 export const MailboxContext = createContext<MailboxContextType>({
@@ -76,6 +77,7 @@ export const MailboxContext = createContext<MailboxContextType>({
   successMessage: null,
   showSuccessMessage: () => {},
   showErrorMessage: () => {},
+  handleMailboxNotFound: async () => {},
 });
 
 interface MailboxProviderProps {
@@ -83,7 +85,7 @@ interface MailboxProviderProps {
 }
 
 export const MailboxProvider: React.FC<MailboxProviderProps> = ({ children }) => {
-  const { isAuthenticated, user } = useAuthContext();
+  const { isAuthenticated, user } = useContext(AuthContext);
   const [mailboxes, setMailboxes] = useState<Mailbox[]>([]);
   const [currentMailbox, setCurrentMailboxState] = useState<Mailbox | null>(null);
   const [isLoading, setIsLoading] = useState(true);
@@ -169,7 +171,7 @@ export const MailboxProvider: React.FC<MailboxProviderProps> = ({ children }) =>
       // 尝试使用服务器数据
       if (serverMailboxes.length > 0) {
         const current = getCurrentMailboxFromLocalStorage();
-        const validCurrent = serverMailboxes.find(m => m.address === current?.address);
+        const validCurrent = serverMailboxes.find((m: Mailbox) => m.address === current?.address);
         
         if (validCurrent) {
           setCurrentMailboxState(validCurrent);
@@ -324,6 +326,28 @@ export const MailboxProvider: React.FC<MailboxProviderProps> = ({ children }) =>
     setEmailCache({});
   }, []);
 
+  // 处理邮箱不存在的情况
+  const handleMailboxNotFound = useCallback(async () => {
+    if (currentMailbox) {
+      // 清除当前邮箱的本地存储
+      removeMailboxFromLocalStorage(currentMailbox.address);
+      // 从邮箱列表中移除
+      const remaining = mailboxes.filter(m => m.address !== currentMailbox.address);
+      setMailboxes(remaining);
+      // 清除缓存和选中状态
+      clearEmailCache();
+      setSelectedEmail(null);
+      // 如果还有其他邮箱，选择第一个
+      if (remaining.length > 0) {
+        setCurrentMailboxState(remaining[0]);
+      } else {
+        setCurrentMailboxState(null);
+        // 如果没有邮箱了，自动创建一个新邮箱
+        await createNewMailbox();
+      }
+    }
+  }, [currentMailbox, mailboxes, clearEmailCache, createNewMailbox]);
+
   return (
     <MailboxContext.Provider
       value={{
@@ -350,6 +374,7 @@ export const MailboxProvider: React.FC<MailboxProviderProps> = ({ children }) =>
         successMessage,
         showSuccessMessage,
         showErrorMessage,
+        handleMailboxNotFound,
       }}
     >
       {/* 全局通知组件 */}

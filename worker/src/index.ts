@@ -11,7 +11,12 @@ export default {
     
     try {
       // 自动初始化数据库（如果需要）
-      await initializeDatabase(env.DB);
+      // 注意：本地开发环境可能不支持 D1，需要 Cloudflare 账户
+      if (env.DB) {
+        await initializeDatabase(env.DB);
+      } else {
+        console.log('警告: DB 未配置，跳过数据库初始化');
+      }
       
       // 手动初始化数据库（如果请求中包含init参数）
       if (url.searchParams.has('init')) {
@@ -52,6 +57,10 @@ export default {
   
   // 定时任务 - 每小时清理过期邮箱以及过期邮件和已被阅读的邮件
   async scheduled(_event: ScheduledEvent, env: Env, _ctx: ExecutionContext): Promise<void> {
+    if (!env.DB) {
+      console.log('警告: DB 未配置，跳过定时任务');
+      return;
+    }
     try {
       const deleted = await cleanupExpiredMailboxes(env.DB);
       console.log(`已清理 ${deleted} 个过期邮箱`);

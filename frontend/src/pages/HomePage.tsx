@@ -37,7 +37,7 @@ const StructuredData: React.FC = () => {
 const HomePage: React.FC = () => {
   const { t } = useTranslation();
   const { 
-    mailbox, 
+    currentMailbox: mailbox, 
     isLoading, 
     emails, 
     selectedEmail, 

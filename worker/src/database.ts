@@ -14,9 +14,16 @@ import {
   getCurrentTimestamp, 
   calculateExpiryTimestamp 
 } from './utils';
+import { hashPassword } from './auth/password';
 
 // 附件分块大小（字节）
 const CHUNK_SIZE = 500000; // 约500KB
+
+// 默认管理员账号配置
+const DEFAULT_ADMIN = {
+  username: 'admin',
+  password: 'admin123'
+};
 
 /**
  * 初始化数据库
@@ -24,63 +31,26 @@ const CHUNK_SIZE = 500000; // 约500KB
  */
 export async function initializeDatabase(db: D1Database): Promise<void> {
   try {
-    // 创建用户表
-    await db.exec(`CREATE TABLE IF NOT EXISTS users (
-      id TEXT PRIMARY KEY, 
-      username TEXT UNIQUE NOT NULL, 
-      password_hash TEXT NOT NULL, 
-      role TEXT NOT NULL DEFAULT 'user',
-      created_at INTEGER NOT NULL, 
-      updated_at INTEGER NOT NULL
-    );`);
-
-    // 创建会话表
-    await db.exec(`CREATE TABLE IF NOT EXISTS user_sessions (
-      id TEXT PRIMARY KEY,
-      user_id TEXT NOT NULL,
-      expires_at INTEGER NOT NULL,
-      created_at INTEGER NOT NULL,
-      FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
-    );`);
-
-    // 创建邮箱表
-    await db.exec(`CREATE TABLE IF NOT EXISTS mailboxes (
-      id TEXT PRIMARY KEY, 
-      address TEXT UNIQUE NOT NULL, 
-      created_at INTEGER NOT NULL, 
-      expires_at INTEGER NOT NULL, 
-      ip_address TEXT, 
-      last_accessed INTEGER NOT NULL,
-      user_id TEXT,
-      FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE SET NULL
-    );`);
+    // 检查管理员是否存在
+    const adminCount = await db.prepare('SELECT COUNT(*) as count FROM users WHERE role=?').bind('admin').first();
     
-    // 创建邮件表
-    await db.exec(`CREATE TABLE IF NOT EXISTS emails (id TEXT PRIMARY KEY, mailbox_id TEXT NOT NULL, from_address TEXT NOT NULL, from_name TEXT, to_address TEXT NOT NULL, subject TEXT, text_content TEXT, html_content TEXT, received_at INTEGER NOT NULL, has_attachments BOOLEAN DEFAULT FALSE, is_read BOOLEAN DEFAULT FALSE, FOREIGN KEY (mailbox_id) REFERENCES mailboxes(id) ON DELETE CASCADE);`);
-    
-    // 创建附件表
-    await db.exec(`CREATE TABLE IF NOT EXISTS attachments (id TEXT PRIMARY KEY, email_id TEXT NOT NULL, filename TEXT NOT NULL, mime_type TEXT NOT NULL, content TEXT, size INTEGER NOT NULL, created_at INTEGER NOT NULL, is_large BOOLEAN DEFAULT FALSE, chunks_count INTEGER DEFAULT 0, FOREIGN KEY (email_id) REFERENCES emails(id) ON DELETE CASCADE);`);
-    
-    // 创建附件块表
-    await db.exec(`CREATE TABLE IF NOT EXISTS attachment_chunks (id TEXT PRIMARY KEY, attachment_id TEXT NOT NULL, chunk_index INTEGER NOT NULL, content TEXT NOT NULL, FOREIGN KEY (attachment_id) REFERENCES attachments(id) ON DELETE CASCADE);`);
-    
-    // 创建索引
-    await db.exec(`CREATE INDEX IF NOT EXISTS idx_users_username ON users(username);`);
-    await db.exec(`CREATE INDEX IF NOT EXISTS idx_sessions_user_id ON user_sessions(user_id);`);
-    await db.exec(`CREATE INDEX IF NOT EXISTS idx_mailboxes_address ON mailboxes(address);`);
-    await db.exec(`CREATE INDEX IF NOT EXISTS idx_mailboxes_expires_at ON mailboxes(expires_at);`);
-    await db.exec(`CREATE INDEX IF NOT EXISTS idx_mailboxes_user_id ON mailboxes(user_id);`);
-    await db.exec(`CREATE INDEX IF NOT EXISTS idx_emails_mailbox_id ON emails(mailbox_id);`);
-    await db.exec(`CREATE INDEX IF NOT EXISTS idx_emails_received_at ON emails(received_at);`);
-    await db.exec(`CREATE INDEX IF NOT EXISTS idx_attachments_email_id ON attachments(email_id);`);
-    await db.exec(`CREATE INDEX IF NOT EXISTS idx_attachment_chunks_attachment_id ON attachment_chunks(attachment_id);`);
-    await db.exec(`CREATE INDEX IF NOT EXISTS idx_attachment_chunks_chunk_index ON attachment_chunks(chunk_index);`);
+    // 如果没有管理员，创建默认管理员
+    if (!adminCount || (adminCount.count as number) === 0) {
+      console.log('创建默认管理员账号...');
+      const now = getCurrentTimestamp();
+      const passwordHash = await hashPassword(DEFAULT_ADMIN.password);
+      await db.prepare('INSERT INTO users (id, username, password_hash, role, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?)')
+        .bind(generateId(), DEFAULT_ADMIN.username, passwordHash, 'admin', now, now)
+        .run();
+      console.log(`默认管理员账号已创建: ${DEFAULT_ADMIN.username} / ${DEFAULT_ADMIN.password}`);
+    } else {
+      console.log('管理员账号已存在，跳过创建');
+    }
     
     console.log('数据库初始化成功');
   } catch (error) {
     console.error('数据库初始化失败:', error);
-    // 抛出错误，让上层处理
-    throw new Error(`数据库初始化失败: ${error instanceof Error ? error.message : String(error)}`);
+    throw error;
   }
 }
 
