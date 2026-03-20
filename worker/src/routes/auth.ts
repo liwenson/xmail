@@ -93,11 +93,9 @@ auth.post('/setup', async (c) => {
       role: user.role,
     }, secret);
     
-    // 设置 Cookie
-    c.header('Set-Cookie', `auth_token=${token}; HttpOnly; Path=/; Max-Age=${7 * 24 * 60 * 60}; SameSite=Strict`);
-    
     return c.json({
       success: true,
+      token,
       user: {
         id: user.id,
         username: user.username,
@@ -156,11 +154,9 @@ auth.post('/login', async (c) => {
       role: user.role,
     }, secret);
     
-    // 设置 Cookie
-    c.header('Set-Cookie', `auth_token=${token}; HttpOnly; Path=/; Max-Age=${7 * 24 * 60 * 60}; SameSite=Strict`);
-    
     return c.json({
       success: true,
+      token,
       user: {
         id: user.id,
         username: user.username,
@@ -178,18 +174,7 @@ auth.post('/login', async (c) => {
 
 // 用户登出
 auth.post('/logout', async (c) => {
-  try {
-    // 清除 Cookie
-    c.header('Set-Cookie', 'auth_token=; HttpOnly; Path=/; Max-Age=0');
-    
-    return c.json({ success: true });
-  } catch (error) {
-    console.error('登出失败:', error);
-    return c.json({ 
-      success: false, 
-      error: '登出失败' 
-    }, 500);
-  }
+  return c.json({ success: true });
 });
 
 // 获取当前用户信息

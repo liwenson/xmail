@@ -23,7 +23,13 @@ const ADMIN_PATHS = [
 
 // 提取 token 的函数
 function extractToken(request: Request): string | null {
-  // 从 Cookie 中获取
+  // 从 Authorization Header 获取 (优先)
+  const authHeader = request.headers.get('Authorization');
+  if (authHeader && authHeader.startsWith('Bearer ')) {
+    return authHeader.substring(7);
+  }
+  
+  // 从 Cookie 中获取 (备选)
   const cookieHeader = request.headers.get('Cookie');
   if (cookieHeader) {
     const cookies = Object.fromEntries(
@@ -35,12 +41,6 @@ function extractToken(request: Request): string | null {
     if (cookies['auth_token']) {
       return cookies['auth_token'];
     }
-  }
-  
-  // 从 Authorization Header 获取
-  const authHeader = request.headers.get('Authorization');
-  if (authHeader && authHeader.startsWith('Bearer ')) {
-    return authHeader.substring(7);
   }
   
   return null;

@@ -3,11 +3,36 @@ import { API_BASE_URL } from "../config";
 // API请求基础URL
 const apiUrl = (path: string) => `${API_BASE_URL}${path}`;
 
+// JWT Token 管理
+const TOKEN_KEY = 'xmail_auth_token';
+
+export const getToken = (): string | null => {
+  return localStorage.getItem(TOKEN_KEY);
+};
+
+export const setToken = (token: string): void => {
+  localStorage.setItem(TOKEN_KEY, token);
+};
+
+export const removeToken = (): void => {
+  localStorage.removeItem(TOKEN_KEY);
+};
+
+// 获取认证 headers
+const getAuthHeaders = (): Record<string, string> => {
+  const token = getToken();
+  const headers: Record<string, string> = { 'Content-Type': 'application/json' };
+  if (token) {
+    headers['Authorization'] = `Bearer ${token}`;
+  }
+  return headers;
+};
+
 // 获取认证用户信息
 export const getCurrentUser = async () => {
   try {
     const response = await fetch(apiUrl('/api/auth/me'), {
-      credentials: 'include',
+      headers: getAuthHeaders(),
     });
     const data = await response.json();
     
@@ -39,16 +64,14 @@ export const setupAdmin = async (username: string, password: string) => {
   try {
     const response = await fetch(apiUrl('/api/auth/setup'), {
       method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-      },
+      headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ username, password }),
-      credentials: 'include',
     });
     
     const data = await response.json();
     
-    if (data.success && data.user) {
+    if (data.success && data.token) {
+      setToken(data.token);
       return { success: true, user: data.user };
     } else {
       return { success: false, error: data.error || '创建失败' };
@@ -64,16 +87,14 @@ export const login = async (username: string, password: string) => {
   try {
     const response = await fetch(apiUrl('/api/auth/login'), {
       method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-      },
+      headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ username, password }),
-      credentials: 'include',
     });
     
     const data = await response.json();
     
-    if (data.success && data.user) {
+    if (data.success && data.token) {
+      setToken(data.token);
       return { success: true, user: data.user };
     } else {
       return { success: false, error: data.error || '登录失败' };
@@ -86,23 +107,15 @@ export const login = async (username: string, password: string) => {
 
 // 登出
 export const logout = async () => {
-  try {
-    await fetch(apiUrl('/api/auth/logout'), {
-      method: 'POST',
-      credentials: 'include',
-    });
-    return { success: true };
-  } catch (error) {
-    console.error('登出失败:', error);
-    return { success: false, error };
-  }
+  removeToken();
+  return { success: true };
 };
 
 // 获取用户的邮箱列表
 export const getMailboxes = async () => {
   try {
     const response = await fetch(apiUrl('/api/mailboxes'), {
-      credentials: 'include',
+      headers: getAuthHeaders(),
     });
     
     if (!response.ok) {
@@ -130,11 +143,8 @@ export const createRandomMailbox = async (expiresInHours = 24) => {
   try {
     const response = await fetch(apiUrl('/api/mailboxes'), {
       method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-      },
+      headers: getAuthHeaders(),
       body: JSON.stringify({ expiresInHours }),
-      credentials: 'include',
     });
     
     const data = await response.json();
@@ -163,14 +173,11 @@ export const createCustomMailbox = async (address: string, expiresInHours = 24) 
     
     const response = await fetch(apiUrl('/api/mailboxes'), {
       method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-      },
+      headers: getAuthHeaders(),
       body: JSON.stringify({
         address: address.trim(),
         expiresInHours,
       }),
-      credentials: 'include',
     });
     
     const data = await response.json();
@@ -194,7 +201,7 @@ export const createCustomMailbox = async (address: string, expiresInHours = 24) 
 export const getMailbox = async (address: string) => {
   try {
     const response = await fetch(apiUrl(`/api/mailboxes/${address}`), {
-      credentials: 'include',
+      headers: getAuthHeaders(),
     });
     
     if (!response.ok) {
@@ -224,7 +231,7 @@ export const getEmails = async (address: string) => {
     }
     
     const response = await fetch(apiUrl(`/api/mailboxes/${address}/emails`), {
-      credentials: 'include',
+      headers: getAuthHeaders(),
     });
     
     if (response.status === 404) {
@@ -256,7 +263,7 @@ export const deleteMailbox = async (address: string) => {
   try {
     const response = await fetch(apiUrl(`/api/mailboxes/${address}`), {
       method: 'DELETE',
-      credentials: 'include',
+      headers: getAuthHeaders(),
     });
     
     if (!response.ok) {
@@ -275,13 +282,13 @@ export const deleteMailbox = async (address: string) => {
   }
 };
 
-// ============ 管理 API ============
+// ============ 管理 API =============
 
 // 获取所有用户（管理员）
 export const getAllUsers = async () => {
   try {
     const response = await fetch(apiUrl('/api/admin/users'), {
-      credentials: 'include',
+      headers: getAuthHeaders(),
     });
     
     const data = await response.json();
@@ -302,11 +309,8 @@ export const createUser = async (username: string, password: string, role: 'admi
   try {
     const response = await fetch(apiUrl('/api/admin/users'), {
       method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-      },
+      headers: getAuthHeaders(),
       body: JSON.stringify({ username, password, role }),
-      credentials: 'include',
     });
     
     const data = await response.json();
@@ -327,11 +331,8 @@ export const updateUser = async (id: string, updates: { username?: string; passw
   try {
     const response = await fetch(apiUrl(`/api/admin/users/${id}`), {
       method: 'PUT',
-      headers: {
-        'Content-Type': 'application/json',
-      },
+      headers: getAuthHeaders(),
       body: JSON.stringify(updates),
-      credentials: 'include',
     });
     
     const data = await response.json();
@@ -352,7 +353,7 @@ export const deleteUser = async (id: string) => {
   try {
     const response = await fetch(apiUrl(`/api/admin/users/${id}`), {
       method: 'DELETE',
-      credentials: 'include',
+      headers: getAuthHeaders(),
     });
     
     const data = await response.json();
@@ -372,7 +373,7 @@ export const deleteUser = async (id: string) => {
 export const getSystemStats = async () => {
   try {
     const response = await fetch(apiUrl('/api/admin/stats'), {
-      credentials: 'include',
+      headers: getAuthHeaders(),
     });
     
     const data = await response.json();
@@ -392,7 +393,7 @@ export const getSystemStats = async () => {
 export const getAllMailboxesAdmin = async () => {
   try {
     const response = await fetch(apiUrl('/api/admin/mailboxes'), {
-      credentials: 'include',
+      headers: getAuthHeaders(),
     });
     
     const data = await response.json();
