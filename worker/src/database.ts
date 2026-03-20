@@ -31,6 +31,45 @@ const DEFAULT_ADMIN = {
  */
 export async function initializeDatabase(db: D1Database): Promise<void> {
   try {
+    // 检查用户表是否存在
+    const existingTables = await db.prepare('SELECT name FROM sqlite_master WHERE type=? AND name=?').bind('table', 'users').first();
+    
+    if (!existingTables) {
+      console.log('开始创建数据库表...');
+      
+      // 创建用户表
+      await db.prepare('CREATE TABLE users (id TEXT PRIMARY KEY, username TEXT UNIQUE NOT NULL, password_hash TEXT NOT NULL, role TEXT NOT NULL DEFAULT "user", created_at INTEGER NOT NULL, updated_at INTEGER NOT NULL)').run();
+      
+      // 创建会话表
+      await db.prepare('CREATE TABLE user_sessions (id TEXT PRIMARY KEY, user_id TEXT NOT NULL, expires_at INTEGER NOT NULL, created_at INTEGER NOT NULL)').run();
+      
+      // 创建邮箱表
+      await db.prepare('CREATE TABLE mailboxes (id TEXT PRIMARY KEY, address TEXT UNIQUE NOT NULL, created_at INTEGER NOT NULL, expires_at INTEGER NOT NULL, ip_address TEXT, last_accessed INTEGER NOT NULL, user_id TEXT)').run();
+      
+      // 创建邮件表
+      await db.prepare('CREATE TABLE emails (id TEXT PRIMARY KEY, mailbox_id TEXT NOT NULL, from_address TEXT NOT NULL, from_name TEXT, to_address TEXT NOT NULL, subject TEXT, text_content TEXT, html_content TEXT, received_at INTEGER NOT NULL, has_attachments INTEGER DEFAULT 0, is_read INTEGER DEFAULT 0)').run();
+      
+      // 创建附件表
+      await db.prepare('CREATE TABLE attachments (id TEXT PRIMARY KEY, email_id TEXT NOT NULL, filename TEXT NOT NULL, mime_type TEXT NOT NULL, content TEXT, size INTEGER NOT NULL, created_at INTEGER NOT NULL, is_large INTEGER DEFAULT 0, chunks_count INTEGER DEFAULT 0)').run();
+      
+      // 创建附件块表
+      await db.prepare('CREATE TABLE attachment_chunks (id TEXT PRIMARY KEY, attachment_id TEXT NOT NULL, chunk_index INTEGER NOT NULL, content TEXT NOT NULL)').run();
+      
+      // 创建索引
+      await db.prepare('CREATE INDEX idx_users_username ON users(username)').run();
+      await db.prepare('CREATE INDEX idx_sessions_user_id ON user_sessions(user_id)').run();
+      await db.prepare('CREATE INDEX idx_mailboxes_address ON mailboxes(address)').run();
+      await db.prepare('CREATE INDEX idx_mailboxes_expires_at ON mailboxes(expires_at)').run();
+      await db.prepare('CREATE INDEX idx_mailboxes_user_id ON mailboxes(user_id)').run();
+      await db.prepare('CREATE INDEX idx_emails_mailbox_id ON emails(mailbox_id)').run();
+      await db.prepare('CREATE INDEX idx_emails_received_at ON emails(received_at)').run();
+      await db.prepare('CREATE INDEX idx_attachments_email_id ON attachments(email_id)').run();
+      await db.prepare('CREATE INDEX idx_attachment_chunks_attachment_id ON attachment_chunks(attachment_id)').run();
+      await db.prepare('CREATE INDEX idx_attachment_chunks_chunk_index ON attachment_chunks(chunk_index)').run();
+      
+      console.log('数据库表创建成功');
+    }
+    
     // 检查管理员是否存在
     const adminCount = await db.prepare('SELECT COUNT(*) as count FROM users WHERE role=?').bind('admin').first();
     
