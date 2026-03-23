@@ -2,6 +2,7 @@ import React, { useState, useEffect, useContext, useCallback } from 'react';
 import { useTranslation } from 'react-i18next';
 import { API_BASE_URL } from '../config';
 import { MailboxContext } from '../contexts/MailboxContext';
+import { getToken } from '../utils/api';
 
 interface EmailDetailProps {
   emailId: string;
@@ -27,11 +28,24 @@ const EmailDetail: React.FC<EmailDetailProps> = ({ emailId, onClose }) => {
   const [attachments, setAttachments] = useState<Attachment[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [isLoadingAttachments, setIsLoadingAttachments] = useState(false);
+
+  const getAuthHeaders = useCallback((): HeadersInit => {
+    const token = getToken();
+    if (!token) {
+      return {};
+    }
+
+    return {
+      Authorization: `Bearer ${token}`,
+    };
+  }, []);
   
   const fetchAttachments = useCallback(async (targetEmailId: string, emailData?: Email) => {
     try {
       setIsLoadingAttachments(true);
-      const response = await fetch(`${API_BASE_URL}/api/emails/${targetEmailId}/attachments`);
+      const response = await fetch(`${API_BASE_URL}/api/emails/${targetEmailId}/attachments`, {
+        headers: getAuthHeaders(),
+      });
       
       if (!response.ok) {
         // 如果邮箱不存在（404），则清除本地缓存并创建新邮箱
@@ -59,7 +73,7 @@ const EmailDetail: React.FC<EmailDetailProps> = ({ emailId, onClose }) => {
     } finally {
       setIsLoadingAttachments(false);
     }
-  }, [addToEmailCache, handleMailboxNotFound, onClose]);
+  }, [addToEmailCache, getAuthHeaders, handleMailboxNotFound, onClose]);
 
   useEffect(() => {
     const fetchEmail = async () => {
@@ -72,7 +86,9 @@ const EmailDetail: React.FC<EmailDetailProps> = ({ emailId, onClose }) => {
         }
 
         setIsLoading(true);
-        const response = await fetch(`${API_BASE_URL}/api/emails/${emailId}`);
+        const response = await fetch(`${API_BASE_URL}/api/emails/${emailId}`, {
+          headers: getAuthHeaders(),
+        });
 
         if (!response.ok) {
           if (response.status === 404) {
@@ -103,12 +119,13 @@ const EmailDetail: React.FC<EmailDetailProps> = ({ emailId, onClose }) => {
     };
 
     fetchEmail();
-  }, [emailId, t, emailCache, addToEmailCache, fetchAttachments, handleMailboxNotFound, onClose, showErrorMessage]);
+  }, [emailId, t, emailCache, addToEmailCache, fetchAttachments, getAuthHeaders, handleMailboxNotFound, onClose, showErrorMessage]);
   
   const handleDelete = async () => {
     try {
       const response = await fetch(`${API_BASE_URL}/api/emails/${emailId}`, {
         method: 'DELETE',
+        headers: getAuthHeaders(),
       });
       
       if (!response.ok) {
@@ -127,7 +144,7 @@ const EmailDetail: React.FC<EmailDetailProps> = ({ emailId, onClose }) => {
       } else {
         throw new Error(data.error || 'Unknown error');
       }
-    } catch (error) {
+    } catch {
       // fix: 使用全局通知函数
       showErrorMessage(t('email.deleteFailed'));
     }

@@ -45,5 +45,5 @@ export const DEFAULT_EMAIL_DOMAIN = EMAIL_DOMAINS[0] || 'example.com';
 export const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || '';
 
 // 其他配置
-export const DEFAULT_AUTO_REFRESH = false;
+export const DEFAULT_AUTO_REFRESH = true;
 export const AUTO_REFRESH_INTERVAL = 10000; // 10秒
