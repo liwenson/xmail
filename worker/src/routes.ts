@@ -18,7 +18,6 @@ import {
   getUserMailboxCount,
   getUserMailboxes,
   getUserById,
-  createApiToken,
   getAllApiTokens,
   getUserApiTokens,
   revokeApiToken,
@@ -111,50 +110,7 @@ authProtected.get('/me', async (c) => {
 
 // 创建 API Token（明文 token 仅返回一次）
 authProtected.post('/tokens', async (c) => {
-  try {
-    const user = c.get('user');
-    if (!user) {
-      return c.json({ success: false, error: '未登录' }, 401);
-    }
-
-    const body = await c.req.json();
-    const name = typeof body.name === 'string' ? body.name.trim() : '';
-    const expiresInDays = typeof body.expiresInDays === 'number' ? body.expiresInDays : undefined;
-
-    if (!name) {
-      return c.json({ success: false, error: 'Token 名称不能为空' }, 400);
-    }
-
-    if (name.length > 64) {
-      return c.json({ success: false, error: 'Token 名称不能超过 64 个字符' }, 400);
-    }
-
-    if (typeof expiresInDays === 'number' && (expiresInDays <= 0 || expiresInDays > 3650)) {
-      return c.json({ success: false, error: '过期天数必须在 1 到 3650 之间' }, 400);
-    }
-
-    const { apiToken, plainToken } = await createApiToken(c.env.DB, {
-      userId: user.sub,
-      name,
-      expiresInDays,
-    });
-
-    return c.json({
-      success: true,
-      token: plainToken,
-      apiToken: {
-        id: apiToken.id,
-        name: apiToken.name,
-        createdAt: apiToken.createdAt,
-        expiresAt: apiToken.expiresAt,
-        lastUsedAt: apiToken.lastUsedAt,
-      },
-      usage: 'Authorization: Bearer <token>',
-    });
-  } catch (error) {
-    console.error('创建 API Token 失败:', error);
-    return c.json({ success: false, error: '创建 API Token 失败' }, 500);
-  }
+  return c.json({ success: false, error: '已禁用通过 API 创建 Token' }, 403);
 });
 
 // 获取当前用户 API Token 列表
@@ -412,6 +368,56 @@ protectedRoutes.get('/api/mailboxes/:address/emails', async (c) => {
     return c.json({ 
       success: false, 
       error: '获取邮件列表失败',
+    }, 500);
+  }
+});
+
+// 通过邮箱地址和邮件ID获取邮件内容（便于 API 直接读取正文）
+protectedRoutes.get('/api/mailboxes/:address/emails/:id/content', async (c) => {
+  try {
+    const user = getCurrentUser(c);
+    const address = c.req.param('address');
+    const id = c.req.param('id');
+    const mailbox = await getMailbox(c.env.DB, address);
+
+    if (!mailbox) {
+      return c.json({ success: false, error: '邮箱不存在' }, 404);
+    }
+
+    if (user && user.role !== 'admin' && mailbox.userId !== user.sub) {
+      return c.json({ success: false, error: '无权访问此邮箱' }, 403);
+    }
+
+    const email = await getEmailById(c.env.DB, id);
+    if (!email) {
+      return c.json({ success: false, error: '邮件不存在' }, 404);
+    }
+
+    if (email.mailboxId !== mailbox.id) {
+      return c.json({ success: false, error: '邮件不属于该邮箱' }, 400);
+    }
+
+    return c.json({
+      success: true,
+      email: {
+        id: email.id,
+        mailboxId: email.mailboxId,
+        fromAddress: email.fromAddress,
+        fromName: email.fromName,
+        toAddress: email.toAddress,
+        subject: email.subject,
+        textContent: email.textContent || '',
+        htmlContent: email.htmlContent || '',
+        receivedAt: email.receivedAt,
+        hasAttachments: email.hasAttachments,
+        isRead: email.isRead,
+      },
+    });
+  } catch (error) {
+    console.error('获取邮件内容失败:', error);
+    return c.json({
+      success: false,
+      error: '获取邮件内容失败',
     }, 500);
   }
 });

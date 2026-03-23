@@ -162,6 +162,39 @@ Regardless of which deployment method you choose, you need to configure Cloudfla
   </ol>
 </div>
 
+### 🔌 API Usage Example (Token-based)
+
+After deployment and login, call APIs using an **existing API token**.
+
+<div style="background-color: #2d2d2d; color: #ffffff; padding: 15px; border-radius: 5px; margin: 15px 0;">
+
+```bash
+# 1) Create mailbox with API token
+curl -X POST "https://<your-domain>/api/mailboxes" \
+  -H "Authorization: Bearer <your-api-token>" \
+  -H "Content-Type: application/json" \
+  -d '{}'
+
+# 2) List mailboxes
+curl "https://<your-domain>/api/mailboxes" \
+  -H "Authorization: Bearer <your-api-token>"
+
+# 3) List emails for a mailbox
+curl "https://<your-domain>/api/mailboxes/<mailbox-address>/emails" \
+  -H "Authorization: Bearer <your-api-token>"
+
+# 4) Get full content (text/html) for a specific email
+curl "https://<your-domain>/api/mailboxes/<mailbox-address>/emails/<email-id>/content" \
+  -H "Authorization: Bearer <your-api-token>"
+```
+
+</div>
+
+> ⚠️ Notes:
+> 1. `https://<your-domain>` must be routed to the Worker deployed from this project.  
+> 2. API token creation via API is disabled — use an existing token.  
+> 3. If you get `{"error":"not found"}`, your domain route is likely not pointing to this Worker.
+
 ---
 
 ## 💻 Local Development
