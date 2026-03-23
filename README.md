@@ -9,6 +9,8 @@
 
   <img src="frontend/public/favicon.svg" alt="XMAIL Logo" width="120" height="120" style="background-color: #4f46e5; padding: 20px; border-radius: 12px; margin: 20px 0;">
 
+  <h1> <a href="https://github.com/zaunist/zmail" target="_blank"><strong>原项目ZMAIL</strong></a> </h1>
+
   <h3>💌 安全、简单、即用即走的临时邮箱服务</h3>
 
   <p>
