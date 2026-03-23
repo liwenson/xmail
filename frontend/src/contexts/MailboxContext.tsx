@@ -7,21 +7,32 @@ import {
   getMailboxes,
   createRandomMailbox,
   createCustomMailbox,
-  getMailbox,
   getEmails,
   deleteMailbox as apiDeleteMailbox,
-  getMailboxesFromLocalStorage,
   getCurrentMailboxFromLocalStorage,
   saveMailboxToLocalStorage,
   removeMailboxFromLocalStorage,
 } from '../utils/api';
 import { DEFAULT_AUTO_REFRESH, AUTO_REFRESH_INTERVAL } from '../config';
 
+interface CachedAttachment {
+  id: string;
+  emailId: string;
+  filename: string;
+  mimeType: string;
+  size: number;
+  createdAt: number;
+  isLarge: boolean;
+  chunksCount: number;
+}
+
+const MAX_USER_MAILBOXES = 5;
+
 // 邮件详情缓存接口
 interface EmailCache {
   [emailId: string]: {
     email: Email;
-    attachments: any[];
+    attachments: CachedAttachment[];
     timestamp: number;
   }
 }
@@ -39,18 +50,19 @@ interface MailboxContextType {
   setIsEmailsLoading: (loading: boolean) => void;
   autoRefresh: boolean;
   setAutoRefresh: (autoRefresh: boolean) => void;
-  createNewMailbox: () => Promise<void>;
-  createCustomMailbox: (address: string) => Promise<void>;
-  deleteMailbox: (address: string) => Promise<void>;
+  createNewMailbox: () => Promise<Mailbox | null>;
+  createCustomMailbox: (address: string) => Promise<Mailbox | null>;
+  deleteMailbox: (address: string, options?: { silent?: boolean }) => Promise<boolean>;
   refreshEmails: (isManual?: boolean) => Promise<void>;
   emailCache: EmailCache;
-  addToEmailCache: (emailId: string, email: Email, attachments: any[]) => void;
+  addToEmailCache: (emailId: string, email: Email, attachments: CachedAttachment[]) => void;
   clearEmailCache: () => void;
   errorMessage: string | null;
   successMessage: string | null;
   showSuccessMessage: (message: string) => void;
   showErrorMessage: (message: string) => void;
   handleMailboxNotFound: () => Promise<void>;
+  maxUserMailboxes: number;
 }
 
 export const MailboxContext = createContext<MailboxContextType>({
@@ -66,9 +78,9 @@ export const MailboxContext = createContext<MailboxContextType>({
   setIsEmailsLoading: () => {},
   autoRefresh: DEFAULT_AUTO_REFRESH,
   setAutoRefresh: () => {},
-  createNewMailbox: async () => {},
-  createCustomMailbox: async () => {},
-  deleteMailbox: async () => {},
+  createNewMailbox: async () => null,
+  createCustomMailbox: async () => null,
+  deleteMailbox: async () => false,
   refreshEmails: async () => {},
   emailCache: {},
   addToEmailCache: () => {},
@@ -78,6 +90,7 @@ export const MailboxContext = createContext<MailboxContextType>({
   showSuccessMessage: () => {},
   showErrorMessage: () => {},
   handleMailboxNotFound: async () => {},
+  maxUserMailboxes: MAX_USER_MAILBOXES,
 });
 
 interface MailboxProviderProps {
@@ -85,7 +98,7 @@ interface MailboxProviderProps {
 }
 
 export const MailboxProvider: React.FC<MailboxProviderProps> = ({ children }) => {
-  const { isAuthenticated, user } = useContext(AuthContext);
+  const { isAuthenticated } = useContext(AuthContext);
   const [mailboxes, setMailboxes] = useState<Mailbox[]>([]);
   const [currentMailbox, setCurrentMailboxState] = useState<Mailbox | null>(null);
   const [isLoading, setIsLoading] = useState(true);
@@ -98,6 +111,7 @@ export const MailboxProvider: React.FC<MailboxProviderProps> = ({ children }) =>
   const [successMessage, setSuccessMessage] = useState<string | null>(null);
   const errorTimeoutRef = React.useRef<number | null>(null);
   const successTimeoutRef = React.useRef<number | null>(null);
+  const isEmailsLoadingRef = React.useRef(false);
 
   // 显示成功消息
   const showSuccessMessage = useCallback((message: string) => {
@@ -154,6 +168,29 @@ export const MailboxProvider: React.FC<MailboxProviderProps> = ({ children }) =>
     return [];
   }, []);
 
+  const upsertMailbox = useCallback((mailbox: Mailbox) => {
+    setMailboxes((previousMailboxes) => {
+      const mailboxExists = previousMailboxes.some((item) => item.address === mailbox.address);
+      if (mailboxExists) {
+        return previousMailboxes.map((item) => item.address === mailbox.address ? mailbox : item);
+      }
+
+      return [...previousMailboxes, mailbox];
+    });
+  }, []);
+
+  const ensureMailboxExists = useCallback(async (): Promise<Mailbox | null> => {
+    const result = await createRandomMailbox();
+    if (result.success && result.mailbox) {
+      upsertMailbox(result.mailbox);
+      setCurrentMailbox(result.mailbox);
+      return result.mailbox;
+    }
+
+    showErrorMessage(result.error || '创建邮箱失败');
+    return null;
+  }, [setCurrentMailbox, showErrorMessage, upsertMailbox]);
+
   // 初始化邮箱
   const initMailboxes = useCallback(async () => {
     if (!isAuthenticated) {
@@ -178,13 +215,15 @@ export const MailboxProvider: React.FC<MailboxProviderProps> = ({ children }) =>
         } else {
           setCurrentMailboxState(serverMailboxes[0]);
         }
+      } else {
+        await ensureMailboxExists();
       }
     } catch (error) {
       console.error('初始化邮箱失败:', error);
     } finally {
       setIsLoading(false);
     }
-  }, [isAuthenticated, fetchMailboxes]);
+  }, [isAuthenticated, fetchMailboxes, ensureMailboxExists]);
 
   // 监听认证状态变化
   useEffect(() => {
@@ -192,16 +231,17 @@ export const MailboxProvider: React.FC<MailboxProviderProps> = ({ children }) =>
   }, [initMailboxes]);
 
   // 创建新邮箱
-  const createNewMailbox = useCallback(async () => {
+  const createNewMailbox = useCallback(async (): Promise<Mailbox | null> => {
     try {
       setErrorMessage(null);
       setSuccessMessage(null);
       
       const result = await createRandomMailbox();
       if (result.success && result.mailbox) {
-        setMailboxes(prev => [...prev, result.mailbox!]);
+        upsertMailbox(result.mailbox);
         setCurrentMailbox(result.mailbox);
         showSuccessMessage('邮箱创建成功');
+        return result.mailbox;
       } else {
         showErrorMessage(result.error || '创建邮箱失败');
       }
@@ -209,19 +249,21 @@ export const MailboxProvider: React.FC<MailboxProviderProps> = ({ children }) =>
       console.error('创建邮箱失败:', error);
       showErrorMessage('创建邮箱失败');
     }
-  }, [setCurrentMailbox, showSuccessMessage, showErrorMessage]);
+    return null;
+  }, [setCurrentMailbox, showSuccessMessage, showErrorMessage, upsertMailbox]);
 
   // 创建自定义邮箱
-  const createCustomMailboxFn = useCallback(async (address: string) => {
+  const createCustomMailboxFn = useCallback(async (address: string): Promise<Mailbox | null> => {
     try {
       setErrorMessage(null);
       setSuccessMessage(null);
       
       const result = await createCustomMailbox(address);
       if (result.success && result.mailbox) {
-        setMailboxes(prev => [...prev, result.mailbox!]);
+        upsertMailbox(result.mailbox);
         setCurrentMailbox(result.mailbox);
         showSuccessMessage('邮箱创建成功');
+        return result.mailbox;
       } else {
         showErrorMessage(result.error || '创建邮箱失败');
       }
@@ -229,10 +271,11 @@ export const MailboxProvider: React.FC<MailboxProviderProps> = ({ children }) =>
       console.error('创建邮箱失败:', error);
       showErrorMessage('创建邮箱失败');
     }
-  }, [setCurrentMailbox, showSuccessMessage, showErrorMessage]);
+    return null;
+  }, [setCurrentMailbox, showSuccessMessage, showErrorMessage, upsertMailbox]);
 
   // 删除邮箱
-  const deleteMailboxFn = useCallback(async (address: string) => {
+  const deleteMailboxFn = useCallback(async (address: string, options?: { silent?: boolean }): Promise<boolean> => {
     try {
       setErrorMessage(null);
       setSuccessMessage(null);
@@ -250,20 +293,29 @@ export const MailboxProvider: React.FC<MailboxProviderProps> = ({ children }) =>
             setCurrentMailboxState(null);
           }
         }
-        
-        showSuccessMessage('邮箱删除成功');
+
+        if (!options?.silent) {
+          showSuccessMessage('邮箱删除成功');
+        }
+        return true;
       } else {
-        showErrorMessage(result.error || '删除邮箱失败');
+        if (!options?.silent) {
+          showErrorMessage(result.error || '删除邮箱失败');
+        }
       }
     } catch (error) {
       console.error('删除邮箱失败:', error);
-      showErrorMessage('删除邮箱失败');
+      if (!options?.silent) {
+        showErrorMessage('删除邮箱失败');
+      }
     }
+    return false;
   }, [currentMailbox, mailboxes, setCurrentMailbox, showSuccessMessage, showErrorMessage]);
 
   // 刷新邮件
   const refreshEmails = useCallback(async (isManual = false) => {
-    if (!currentMailbox || isEmailsLoading) return;
+    if (!currentMailbox || isEmailsLoadingRef.current) return;
+    isEmailsLoadingRef.current = true;
     setIsEmailsLoading(true);
 
     try {
@@ -287,9 +339,10 @@ export const MailboxProvider: React.FC<MailboxProviderProps> = ({ children }) =>
         showErrorMessage('获取邮件失败');
       }
     } finally {
+      isEmailsLoadingRef.current = false;
       setIsEmailsLoading(false);
     }
-  }, [currentMailbox, isEmailsLoading, showSuccessMessage, showErrorMessage]);
+  }, [currentMailbox, showSuccessMessage, showErrorMessage]);
 
   // 自动刷新邮件
   useEffect(() => {
@@ -310,7 +363,7 @@ export const MailboxProvider: React.FC<MailboxProviderProps> = ({ children }) =>
   }, [currentMailbox, autoRefresh, isLoading, isAuthenticated, refreshEmails]);
 
   // 添加邮件到缓存
-  const addToEmailCache = useCallback((emailId: string, email: Email, attachments: any[]) => {
+  const addToEmailCache = useCallback((emailId: string, email: Email, attachments: CachedAttachment[]) => {
     setEmailCache(prev => ({
       ...prev,
       [emailId]: {
@@ -375,6 +428,7 @@ export const MailboxProvider: React.FC<MailboxProviderProps> = ({ children }) =>
         showSuccessMessage,
         showErrorMessage,
         handleMailboxNotFound,
+        maxUserMailboxes: MAX_USER_MAILBOXES,
       }}
     >
       {/* 全局通知组件 */}

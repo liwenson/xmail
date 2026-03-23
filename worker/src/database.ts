@@ -1,5 +1,9 @@
 import { D1Database } from '@cloudflare/workers-types';
 import { 
+  User,
+  UserSession,
+  ApiToken,
+  CreateApiTokenParams,
   Mailbox, 
   CreateMailboxParams, 
   Email, 
@@ -25,6 +29,51 @@ const DEFAULT_ADMIN = {
   password: 'admin123'
 };
 
+const DATABASE_INITIALIZED_KEY = 'database_initialized';
+const ADMIN_INITIALIZED_KEY = 'admin_initialized';
+
+function bytesToHex(bytes: Uint8Array): string {
+  return Array.from(bytes)
+    .map((byte) => byte.toString(16).padStart(2, '0'))
+    .join('');
+}
+
+function bytesToBase64Url(bytes: Uint8Array): string {
+  let binary = '';
+  for (let i = 0; i < bytes.length; i++) {
+    binary += String.fromCharCode(bytes[i]);
+  }
+
+  return btoa(binary).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
+}
+
+async function hashApiTokenValue(token: string): Promise<string> {
+  const encoded = new TextEncoder().encode(token);
+  const digest = await crypto.subtle.digest('SHA-256', encoded);
+  return bytesToHex(new Uint8Array(digest));
+}
+
+function generateApiTokenValue(): string {
+  const randomBytes = crypto.getRandomValues(new Uint8Array(24));
+  return `xmail_tok_${bytesToBase64Url(randomBytes)}`;
+}
+
+async function setSystemSetting(db: D1Database, key: string, value: string): Promise<void> {
+  const now = getCurrentTimestamp();
+  await db.prepare(`INSERT OR REPLACE INTO system_settings (key, value, updated_at) VALUES (?, ?, ?)`)
+    .bind(key, value, now)
+    .run();
+}
+
+async function getSystemSetting(db: D1Database, key: string): Promise<string | null> {
+  const result = await db.prepare(`SELECT value FROM system_settings WHERE key = ?`).bind(key).first();
+  return (result?.value as string | undefined) ?? null;
+}
+
+function isSettingEnabled(value: string | null): boolean {
+  return value === 'true';
+}
+
 /**
  * 初始化数据库
  * @param db 数据库实例
@@ -42,6 +91,9 @@ export async function initializeDatabase(db: D1Database): Promise<void> {
       
       // 创建会话表
       await db.prepare('CREATE TABLE user_sessions (id TEXT PRIMARY KEY, user_id TEXT NOT NULL, expires_at INTEGER NOT NULL, created_at INTEGER NOT NULL)').run();
+
+      // 创建 API Token 表
+      await db.prepare('CREATE TABLE api_tokens (id TEXT PRIMARY KEY, user_id TEXT NOT NULL, name TEXT NOT NULL, token_hash TEXT NOT NULL UNIQUE, created_at INTEGER NOT NULL, updated_at INTEGER NOT NULL, expires_at INTEGER, last_used_at INTEGER, revoked_at INTEGER)').run();
       
       // 创建邮箱表
       await db.prepare('CREATE TABLE mailboxes (id TEXT PRIMARY KEY, address TEXT UNIQUE NOT NULL, created_at INTEGER NOT NULL, expires_at INTEGER NOT NULL, ip_address TEXT, last_accessed INTEGER NOT NULL, user_id TEXT)').run();
@@ -54,10 +106,15 @@ export async function initializeDatabase(db: D1Database): Promise<void> {
       
       // 创建附件块表
       await db.prepare('CREATE TABLE attachment_chunks (id TEXT PRIMARY KEY, attachment_id TEXT NOT NULL, chunk_index INTEGER NOT NULL, content TEXT NOT NULL)').run();
+
+      // 创建系统设置表
+      await db.prepare('CREATE TABLE system_settings (key TEXT PRIMARY KEY, value TEXT NOT NULL, updated_at INTEGER NOT NULL)').run();
       
       // 创建索引
       await db.prepare('CREATE INDEX idx_users_username ON users(username)').run();
       await db.prepare('CREATE INDEX idx_sessions_user_id ON user_sessions(user_id)').run();
+      await db.prepare('CREATE INDEX idx_api_tokens_user_id ON api_tokens(user_id)').run();
+      await db.prepare('CREATE INDEX idx_api_tokens_hash ON api_tokens(token_hash)').run();
       await db.prepare('CREATE INDEX idx_mailboxes_address ON mailboxes(address)').run();
       await db.prepare('CREATE INDEX idx_mailboxes_expires_at ON mailboxes(expires_at)').run();
       await db.prepare('CREATE INDEX idx_mailboxes_user_id ON mailboxes(user_id)').run();
@@ -69,6 +126,12 @@ export async function initializeDatabase(db: D1Database): Promise<void> {
       
       console.log('数据库表创建成功');
     }
+
+    await db.prepare('CREATE TABLE IF NOT EXISTS system_settings (key TEXT PRIMARY KEY, value TEXT NOT NULL, updated_at INTEGER NOT NULL)').run();
+    await db.prepare('CREATE TABLE IF NOT EXISTS api_tokens (id TEXT PRIMARY KEY, user_id TEXT NOT NULL, name TEXT NOT NULL, token_hash TEXT NOT NULL UNIQUE, created_at INTEGER NOT NULL, updated_at INTEGER NOT NULL, expires_at INTEGER, last_used_at INTEGER, revoked_at INTEGER)').run();
+    await db.prepare('CREATE INDEX IF NOT EXISTS idx_api_tokens_user_id ON api_tokens(user_id)').run();
+    await db.prepare('CREATE INDEX IF NOT EXISTS idx_api_tokens_hash ON api_tokens(token_hash)').run();
+    await setSystemSetting(db, DATABASE_INITIALIZED_KEY, 'true');
     
     // 检查管理员是否存在
     const adminCount = await db.prepare('SELECT COUNT(*) as count FROM users WHERE role=?').bind('admin').first();
@@ -85,12 +148,26 @@ export async function initializeDatabase(db: D1Database): Promise<void> {
     } else {
       console.log('管理员账号已存在，跳过创建');
     }
+
+    await setSystemSetting(db, ADMIN_INITIALIZED_KEY, 'true');
     
     console.log('数据库初始化成功');
   } catch (error) {
     console.error('数据库初始化失败:', error);
     throw error;
   }
+}
+
+export async function isDatabaseInitialized(db: D1Database): Promise<boolean> {
+  return isSettingEnabled(await getSystemSetting(db, DATABASE_INITIALIZED_KEY));
+}
+
+export async function isAdminInitialized(db: D1Database): Promise<boolean> {
+  return isSettingEnabled(await getSystemSetting(db, ADMIN_INITIALIZED_KEY));
+}
+
+export async function markAdminInitialized(db: D1Database): Promise<void> {
+  await setSystemSetting(db, ADMIN_INITIALIZED_KEY, 'true');
 }
 
 /**
@@ -140,6 +217,28 @@ export async function getMailbox(db: D1Database, address: string): Promise<Mailb
     expiresAt: result.expires_at as number,
     ipAddress: result.ip_address as string,
     lastAccessed: now,
+    userId: result.user_id as string | undefined,
+  };
+}
+
+/**
+ * 根据邮箱ID获取邮箱信息
+ * @param db 数据库实例
+ * @param id 邮箱ID
+ * @returns 邮箱信息
+ */
+export async function getMailboxById(db: D1Database, id: string): Promise<Mailbox | null> {
+  const result = await db.prepare(`SELECT id, address, created_at, expires_at, ip_address, last_accessed, user_id FROM mailboxes WHERE id = ?`).bind(id).first();
+
+  if (!result) return null;
+
+  return {
+    id: result.id as string,
+    address: result.address as string,
+    createdAt: result.created_at as number,
+    expiresAt: result.expires_at as number,
+    ipAddress: result.ip_address as string,
+    lastAccessed: result.last_accessed as number,
     userId: result.user_id as string | undefined,
   };
 }
@@ -264,37 +363,6 @@ export async function cleanupReadMails(db: D1Database): Promise<number> {
   await cleanupOrphanedAttachments(db);
   
   return result.meta?.changes || 0;
-}
-
-/**
- * 清理指定邮件的所有附件
- * @param db 数据库实例
- * @param emailId 邮件ID
- */
-async function cleanupAttachments(db: D1Database, emailId: string): Promise<void> {
-  // [refactor] 利用 ON DELETE CASCADE，此函数在删除邮件时不再需要手动调用。
-  // 但保留此函数以备其他需要单独清理附件的场景。
-  try {
-    // 获取邮件的所有附件ID
-    const attachmentsResult = await db.prepare(`SELECT id FROM attachments WHERE email_id = ?`).bind(emailId).all<{ id: string }>();
-    
-    if (attachmentsResult.results && attachmentsResult.results.length > 0) {
-      const attachmentIds = attachmentsResult.results.map(row => row.id);
-      const placeholders = attachmentIds.map(() => '?').join(',');
-
-      console.log(`邮件 ${emailId} 有 ${attachmentIds.length} 个附件需要清理`);
-      
-      // 批量删除所有分块
-      await db.prepare(`DELETE FROM attachment_chunks WHERE attachment_id IN (${placeholders})`).bind(...attachmentIds).run();
-      console.log(`已清理附件的所有分块`);
-      
-      // 批量删除所有附件记录
-      await db.prepare(`DELETE FROM attachments WHERE id IN (${placeholders})`).bind(...attachmentIds).run();
-      console.log(`已清理邮件 ${emailId} 的所有附件`);
-    }
-  } catch (error) {
-    console.error(`清理邮件 ${emailId} 的附件时出错:`, error);
-  }
 }
 
 /**
@@ -443,13 +511,30 @@ export async function getEmails(db: D1Database, mailboxId: string): Promise<Emai
  * @returns 邮件详情
  */
 export async function getEmail(db: D1Database, id: string): Promise<Email | null> {
-  const result = await db.prepare(`SELECT id, mailbox_id, from_address, from_name, to_address, subject, text_content, html_content, received_at, has_attachments, is_read FROM emails WHERE id = ?`).bind(id).first();
-  
-  if (!result) return null;
-  
+  const email = await getEmailById(db, id);
+
+  if (!email) return null;
+
   // 标记为已读
   await db.prepare(`UPDATE emails SET is_read = 1 WHERE id = ?`).bind(id).run();
-  
+
+  return {
+    ...email,
+    isRead: true,
+  };
+}
+
+/**
+ * 获取邮件详情（不修改已读状态）
+ * @param db 数据库实例
+ * @param id 邮件ID
+ * @returns 邮件详情
+ */
+export async function getEmailById(db: D1Database, id: string): Promise<Email | null> {
+  const result = await db.prepare(`SELECT id, mailbox_id, from_address, from_name, to_address, subject, text_content, html_content, received_at, has_attachments, is_read FROM emails WHERE id = ?`).bind(id).first();
+
+  if (!result) return null;
+
   return {
     id: result.id as string,
     mailboxId: result.mailbox_id as string,
@@ -461,7 +546,7 @@ export async function getEmail(db: D1Database, id: string): Promise<Email | null
     htmlContent: result.html_content as string,
     receivedAt: result.received_at as number,
     hasAttachments: !!result.has_attachments,
-    isRead: true,
+    isRead: !!result.is_read,
   };
 }
 
@@ -722,6 +807,163 @@ export async function createSession(db: D1Database, userId: string, expiresInDay
  */
 export async function deleteSession(db: D1Database, sessionId: string): Promise<void> {
   await db.prepare(`DELETE FROM user_sessions WHERE id = ?`).bind(sessionId).run();
+}
+
+/**
+ * 创建 API Token
+ * @param db 数据库实例
+ * @param params 创建参数
+ * @returns 包含一次性明文 token 的结果
+ */
+export async function createApiToken(db: D1Database, params: CreateApiTokenParams): Promise<{ apiToken: ApiToken; plainToken: string }> {
+  const now = getCurrentTimestamp();
+  const plainToken = generateApiTokenValue();
+  const tokenHash = await hashApiTokenValue(plainToken);
+  const expiresAt = typeof params.expiresInDays === 'number' && params.expiresInDays > 0
+    ? calculateExpiryTimestamp(params.expiresInDays * 24)
+    : null;
+
+  const apiToken: ApiToken = {
+    id: generateId(),
+    userId: params.userId,
+    name: params.name,
+    tokenHash,
+    createdAt: now,
+    updatedAt: now,
+    expiresAt,
+    lastUsedAt: null,
+    revokedAt: null,
+  };
+
+  await db.prepare(`INSERT INTO api_tokens (id, user_id, name, token_hash, created_at, updated_at, expires_at, last_used_at, revoked_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`)
+    .bind(
+      apiToken.id,
+      apiToken.userId,
+      apiToken.name,
+      apiToken.tokenHash,
+      apiToken.createdAt,
+      apiToken.updatedAt,
+      apiToken.expiresAt,
+      apiToken.lastUsedAt,
+      apiToken.revokedAt,
+    )
+    .run();
+
+  return { apiToken, plainToken };
+}
+
+/**
+ * 获取用户的 API Token 列表
+ */
+export async function getUserApiTokens(db: D1Database, userId: string): Promise<ApiToken[]> {
+  const results = await db.prepare(`SELECT id, user_id, name, token_hash, created_at, updated_at, expires_at, last_used_at, revoked_at FROM api_tokens WHERE user_id = ? ORDER BY created_at DESC`)
+    .bind(userId)
+    .all();
+
+  if (!results.results) return [];
+
+  return results.results.map((result) => ({
+    id: result.id as string,
+    userId: result.user_id as string,
+    name: result.name as string,
+    tokenHash: result.token_hash as string,
+    createdAt: result.created_at as number,
+    updatedAt: result.updated_at as number,
+    expiresAt: (result.expires_at as number | null) ?? null,
+    lastUsedAt: (result.last_used_at as number | null) ?? null,
+    revokedAt: (result.revoked_at as number | null) ?? null,
+  }));
+}
+
+/**
+ * 获取所有 API Token（管理员）
+ */
+export async function getAllApiTokens(db: D1Database): Promise<Array<ApiToken & { creatorUsername: string }>> {
+  const results = await db.prepare(`
+    SELECT t.id, t.user_id, t.name, t.token_hash, t.created_at, t.updated_at, t.expires_at, t.last_used_at, t.revoked_at, u.username AS creator_username
+    FROM api_tokens t
+    LEFT JOIN users u ON t.user_id = u.id
+    ORDER BY t.created_at DESC
+  `).all();
+
+  if (!results.results) return [];
+
+  return results.results.map((result) => ({
+    id: result.id as string,
+    userId: result.user_id as string,
+    name: result.name as string,
+    tokenHash: result.token_hash as string,
+    createdAt: result.created_at as number,
+    updatedAt: result.updated_at as number,
+    expiresAt: (result.expires_at as number | null) ?? null,
+    lastUsedAt: (result.last_used_at as number | null) ?? null,
+    revokedAt: (result.revoked_at as number | null) ?? null,
+    creatorUsername: (result.creator_username as string | null) ?? 'unknown',
+  }));
+}
+
+/**
+ * 吊销 API Token（仅限所属用户）
+ */
+export async function revokeApiToken(db: D1Database, tokenId: string, userId: string): Promise<boolean> {
+  const now = getCurrentTimestamp();
+  const result = await db.prepare(`UPDATE api_tokens SET revoked_at = ?, updated_at = ? WHERE id = ? AND user_id = ? AND revoked_at IS NULL`)
+    .bind(now, now, tokenId, userId)
+    .run();
+
+  return (result.meta?.changes || 0) > 0;
+}
+
+/**
+ * 吊销 API Token（管理员）
+ */
+export async function revokeApiTokenById(db: D1Database, tokenId: string): Promise<boolean> {
+  const now = getCurrentTimestamp();
+  const result = await db.prepare(`UPDATE api_tokens SET revoked_at = ?, updated_at = ? WHERE id = ? AND revoked_at IS NULL`)
+    .bind(now, now, tokenId)
+    .run();
+
+  return (result.meta?.changes || 0) > 0;
+}
+
+/**
+ * 根据明文 token 查找有效 Token
+ */
+export async function getValidApiTokenByValue(db: D1Database, plainToken: string): Promise<ApiToken | null> {
+  const now = getCurrentTimestamp();
+  const tokenHash = await hashApiTokenValue(plainToken);
+  const result = await db.prepare(`SELECT id, user_id, name, token_hash, created_at, updated_at, expires_at, last_used_at, revoked_at FROM api_tokens WHERE token_hash = ? AND revoked_at IS NULL`)
+    .bind(tokenHash)
+    .first();
+
+  if (!result) return null;
+
+  const expiresAt = (result.expires_at as number | null) ?? null;
+  if (expiresAt !== null && expiresAt <= now) {
+    return null;
+  }
+
+  return {
+    id: result.id as string,
+    userId: result.user_id as string,
+    name: result.name as string,
+    tokenHash: result.token_hash as string,
+    createdAt: result.created_at as number,
+    updatedAt: result.updated_at as number,
+    expiresAt,
+    lastUsedAt: (result.last_used_at as number | null) ?? null,
+    revokedAt: (result.revoked_at as number | null) ?? null,
+  };
+}
+
+/**
+ * 更新 Token 最后使用时间
+ */
+export async function touchApiTokenLastUsed(db: D1Database, tokenId: string): Promise<void> {
+  const now = getCurrentTimestamp();
+  await db.prepare(`UPDATE api_tokens SET last_used_at = ?, updated_at = ? WHERE id = ?`)
+    .bind(now, now, tokenId)
+    .run();
 }
 
 /**

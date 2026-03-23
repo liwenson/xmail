@@ -3,18 +3,26 @@
  */
 import { Hono } from 'hono';
 import { cors } from 'hono/cors';
-import { Env } from './types';
+import { AppEnv, JWTPayload } from './types';
 import { 
   createMailbox, 
   getMailbox, 
+  getMailboxById,
   deleteMailbox, 
   getEmails, 
   getEmail, 
+  getEmailById,
   deleteEmail,
   getAttachments,
   getAttachment,
   getUserMailboxCount,
-  getUserMailboxes
+  getUserMailboxes,
+  getUserById,
+  createApiToken,
+  getAllApiTokens,
+  getUserApiTokens,
+  revokeApiToken,
+  revokeApiTokenById,
 } from './database';
 import { generateRandomAddress } from './utils';
 import { authMiddleware, getCurrentUser } from './auth';
@@ -25,7 +33,47 @@ import adminRoutes from './routes/admin';
 const MAX_MAILBOXES_PER_USER = 5;
 
 // 创建 Hono 应用
-const app = new Hono<{ Bindings: Env }>();
+const app = new Hono<AppEnv>();
+
+function canAccessMailbox(user: JWTPayload, mailboxUserId?: string): boolean {
+  return user.role === 'admin' || mailboxUserId === user.sub;
+}
+
+async function requireMailboxAccess(c: import('hono').Context<AppEnv>, mailboxId: string): Promise<Response | null> {
+  const user = getCurrentUser(c);
+  if (!user) {
+    return c.json({ success: false, error: '未登录' }, 401);
+  }
+
+  const mailbox = await getMailboxById(c.env.DB, mailboxId);
+  if (!mailbox) {
+    return c.json({ success: false, error: '邮箱不存在' }, 404);
+  }
+
+  if (!canAccessMailbox(user, mailbox.userId)) {
+    return c.json({ success: false, error: '无权访问此邮箱' }, 403);
+  }
+
+  return null;
+}
+
+async function requireEmailAccess(c: import('hono').Context<AppEnv>, emailId: string): Promise<Response | null> {
+  const email = await getEmailById(c.env.DB, emailId);
+  if (!email) {
+    return c.json({ success: false, error: '邮件不存在' }, 404);
+  }
+
+  return requireMailboxAccess(c, email.mailboxId);
+}
+
+async function requireAttachmentAccess(c: import('hono').Context<AppEnv>, attachmentId: string): Promise<Response | null> {
+  const attachment = await getAttachment(c.env.DB, attachmentId);
+  if (!attachment) {
+    return c.json({ success: false, error: '附件不存在' }, 404);
+  }
+
+  return requireEmailAccess(c, attachment.emailId);
+}
 
 // 添加 CORS 中间件
 app.use('/*', cors({
@@ -39,17 +87,10 @@ app.use('/*', cors({
 app.route('/api/auth', authRoutes);
 
 // 对需要认证的 auth 路由应用中间件
-const authProtected = new Hono<{ Bindings: Env }>();
-
-// 添加日志中间件来调试
-authProtected.use('/*', async (c, next) => {
-  console.log('authProtected middleware called for:', c.req.path);
-  await next();
-});
+const authProtected = new Hono<AppEnv>();
 
 authProtected.use('/*', authMiddleware);
 authProtected.get('/me', async (c) => {
-  console.log('/me handler called, user:', c.get('user'));
   const user = c.get('user');
   if (!user) {
     return c.json({ success: false, error: '未登录' }, 401);
@@ -66,6 +107,120 @@ authProtected.get('/me', async (c) => {
       role: fullUser.role,
     }
   });
+});
+
+// 创建 API Token（明文 token 仅返回一次）
+authProtected.post('/tokens', async (c) => {
+  try {
+    const user = c.get('user');
+    if (!user) {
+      return c.json({ success: false, error: '未登录' }, 401);
+    }
+
+    const body = await c.req.json();
+    const name = typeof body.name === 'string' ? body.name.trim() : '';
+    const expiresInDays = typeof body.expiresInDays === 'number' ? body.expiresInDays : undefined;
+
+    if (!name) {
+      return c.json({ success: false, error: 'Token 名称不能为空' }, 400);
+    }
+
+    if (name.length > 64) {
+      return c.json({ success: false, error: 'Token 名称不能超过 64 个字符' }, 400);
+    }
+
+    if (typeof expiresInDays === 'number' && (expiresInDays <= 0 || expiresInDays > 3650)) {
+      return c.json({ success: false, error: '过期天数必须在 1 到 3650 之间' }, 400);
+    }
+
+    const { apiToken, plainToken } = await createApiToken(c.env.DB, {
+      userId: user.sub,
+      name,
+      expiresInDays,
+    });
+
+    return c.json({
+      success: true,
+      token: plainToken,
+      apiToken: {
+        id: apiToken.id,
+        name: apiToken.name,
+        createdAt: apiToken.createdAt,
+        expiresAt: apiToken.expiresAt,
+        lastUsedAt: apiToken.lastUsedAt,
+      },
+      usage: 'Authorization: Bearer <token>',
+    });
+  } catch (error) {
+    console.error('创建 API Token 失败:', error);
+    return c.json({ success: false, error: '创建 API Token 失败' }, 500);
+  }
+});
+
+// 获取当前用户 API Token 列表
+authProtected.get('/tokens', async (c) => {
+  try {
+    const user = c.get('user');
+    if (!user) {
+      return c.json({ success: false, error: '未登录' }, 401);
+    }
+
+    const now = Math.floor(Date.now() / 1000);
+    const isAdmin = user.role === 'admin';
+    const tokens = isAdmin
+      ? await getAllApiTokens(c.env.DB)
+      : await getUserApiTokens(c.env.DB, user.sub);
+
+    // 防御性校验：普通用户绝不返回非本人 Token
+    const visibleTokens = isAdmin
+      ? tokens
+      : tokens.filter((token) => token.userId === user.sub);
+
+    return c.json({
+      success: true,
+      tokens: visibleTokens.map((token) => ({
+        id: token.id,
+        creatorUserId: token.userId,
+        creatorUsername: 'creatorUsername' in token ? token.creatorUsername : user.username,
+        name: token.name,
+        createdAt: token.createdAt,
+        expiresAt: token.expiresAt,
+        lastUsedAt: token.lastUsedAt,
+        revokedAt: token.revokedAt,
+        isActive: token.revokedAt === null && (token.expiresAt === null || token.expiresAt > now),
+      })),
+    });
+  } catch (error) {
+    console.error('获取 API Token 列表失败:', error);
+    return c.json({ success: false, error: '获取 API Token 列表失败' }, 500);
+  }
+});
+
+// 吊销 API Token
+authProtected.delete('/tokens/:id', async (c) => {
+  try {
+    const user = c.get('user');
+    if (!user) {
+      return c.json({ success: false, error: '未登录' }, 401);
+    }
+
+    const tokenId = c.req.param('id');
+    if (!tokenId) {
+      return c.json({ success: false, error: 'Token ID 不能为空' }, 400);
+    }
+
+    const revoked = user.role === 'admin'
+      ? await revokeApiTokenById(c.env.DB, tokenId)
+      : await revokeApiToken(c.env.DB, tokenId, user.sub);
+    if (!revoked) {
+      return c.json({ success: false, error: 'Token 不存在或已吊销' }, 404);
+    }
+
+    return c.json({ success: true });
+  } catch (error) {
+    console.error('吊销 API Token 失败:', error);
+    return c.json({ success: false, error: '吊销 API Token 失败' }, 500);
+  }
 });
 app.route('/api/auth/protected', authProtected);
 
@@ -91,13 +246,12 @@ app.get('/api/config', (c) => {
     return c.json({ 
       success: false, 
       error: '获取配置失败',
-      message: error instanceof Error ? error.message : String(error)
     }, 500);
   }
 });
 
 // 需要认证的路由组
-const protectedRoutes = new Hono<{ Bindings: Env }>();
+const protectedRoutes = new Hono<AppEnv>();
 
 // 添加认证中间件
 protectedRoutes.use('/*', authMiddleware);
@@ -118,7 +272,6 @@ protectedRoutes.get('/api/mailboxes', async (c) => {
     return c.json({ 
       success: false, 
       error: '获取邮箱列表失败',
-      message: error instanceof Error ? error.message : String(error)
     }, 500);
   }
 });
@@ -177,7 +330,6 @@ protectedRoutes.post('/api/mailboxes', async (c) => {
     return c.json({ 
       success: false, 
       error: '创建邮箱失败',
-      message: error instanceof Error ? error.message : String(error)
     }, 400);
   }
 });
@@ -204,7 +356,6 @@ protectedRoutes.get('/api/mailboxes/:address', async (c) => {
     return c.json({ 
       success: false, 
       error: '获取邮箱失败',
-      message: error instanceof Error ? error.message : String(error)
     }, 500);
   }
 });
@@ -233,7 +384,6 @@ protectedRoutes.delete('/api/mailboxes/:address', async (c) => {
     return c.json({ 
       success: false, 
       error: '删除邮箱失败',
-      message: error instanceof Error ? error.message : String(error)
     }, 500);
   }
 });
@@ -262,7 +412,6 @@ protectedRoutes.get('/api/mailboxes/:address/emails', async (c) => {
     return c.json({ 
       success: false, 
       error: '获取邮件列表失败',
-      message: error instanceof Error ? error.message : String(error)
     }, 500);
   }
 });
@@ -271,6 +420,11 @@ protectedRoutes.get('/api/mailboxes/:address/emails', async (c) => {
 protectedRoutes.get('/api/emails/:id', async (c) => {
   try {
     const id = c.req.param('id');
+    const accessDeniedResponse = await requireEmailAccess(c, id);
+    if (accessDeniedResponse) {
+      return accessDeniedResponse;
+    }
+
     const email = await getEmail(c.env.DB, id);
     
     if (!email) {
@@ -292,13 +446,11 @@ protectedRoutes.get('/api/emails/:id', async (c) => {
 protectedRoutes.get('/api/emails/:id/attachments', async (c) => {
   try {
     const id = c.req.param('id');
-    
-    // 检查邮件是否存在
-    const email = await getEmail(c.env.DB, id);
-    if (!email) {
-      return c.json({ success: false, error: '邮件不存在' }, 404);
+    const accessDeniedResponse = await requireEmailAccess(c, id);
+    if (accessDeniedResponse) {
+      return accessDeniedResponse;
     }
-    
+
     // 获取附件列表
     const attachments = await getAttachments(c.env.DB, id);
     
@@ -308,7 +460,6 @@ protectedRoutes.get('/api/emails/:id/attachments', async (c) => {
     return c.json({ 
       success: false, 
       error: '获取附件列表失败',
-      message: error instanceof Error ? error.message : String(error)
     }, 500);
   }
 });
@@ -317,6 +468,11 @@ protectedRoutes.get('/api/emails/:id/attachments', async (c) => {
 protectedRoutes.get('/api/attachments/:id', async (c) => {
   try {
     const id = c.req.param('id');
+    const accessDeniedResponse = await requireAttachmentAccess(c, id);
+    if (accessDeniedResponse) {
+      return accessDeniedResponse;
+    }
+
     const attachment = await getAttachment(c.env.DB, id);
     
     if (!attachment) {
@@ -360,7 +516,6 @@ protectedRoutes.get('/api/attachments/:id', async (c) => {
     return c.json({ 
       success: false, 
       error: '获取附件详情失败',
-      message: error instanceof Error ? error.message : String(error)
     }, 500);
   }
 });
@@ -369,6 +524,11 @@ protectedRoutes.get('/api/attachments/:id', async (c) => {
 protectedRoutes.delete('/api/emails/:id', async (c) => {
   try {
     const id = c.req.param('id');
+    const accessDeniedResponse = await requireEmailAccess(c, id);
+    if (accessDeniedResponse) {
+      return accessDeniedResponse;
+    }
+
     await deleteEmail(c.env.DB, id);
     
     return c.json({ success: true });
@@ -377,7 +537,6 @@ protectedRoutes.delete('/api/emails/:id', async (c) => {
     return c.json({ 
       success: false, 
       error: '删除邮件失败',
-      message: error instanceof Error ? error.message : String(error)
     }, 500);
   }
 });
@@ -386,7 +545,7 @@ protectedRoutes.delete('/api/emails/:id', async (c) => {
 app.route('/', protectedRoutes);
 
 // 挂载管理路由（需要管理员权限）
-const adminApp = new Hono<{ Bindings: Env }>();
+const adminApp = new Hono<AppEnv>();
 adminApp.use('/*', authMiddleware);
 adminApp.route('/', adminRoutes);
 app.route('/api/admin', adminApp);

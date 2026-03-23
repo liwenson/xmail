@@ -11,7 +11,6 @@ import {
   updateUser,
   deleteUser,
   getSystemStats,
-  getAllMailboxesAdmin,
 } from '../utils/api';
 
 interface User {

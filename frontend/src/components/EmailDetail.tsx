@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useContext, useRef } from 'react';
+import React, { useState, useEffect, useContext, useCallback } from 'react';
 import { useTranslation } from 'react-i18next';
 import { API_BASE_URL } from '../config';
 import { MailboxContext } from '../contexts/MailboxContext';
@@ -28,59 +28,10 @@ const EmailDetail: React.FC<EmailDetailProps> = ({ emailId, onClose }) => {
   const [isLoading, setIsLoading] = useState(true);
   const [isLoadingAttachments, setIsLoadingAttachments] = useState(false);
   
-  useEffect(() => {
-    const fetchEmail = async () => {
-      try {
-        // 首先检查缓存中是否有该邮件
-        if (emailCache[emailId]) {
-          setEmail(emailCache[emailId].email);
-          setAttachments(emailCache[emailId].attachments);
-          setIsLoading(false);
-          return;
-        }
-        
-        setIsLoading(true);
-        const response = await fetch(`${API_BASE_URL}/api/emails/${emailId}`);
-        
-        if (!response.ok) {
-          // 如果邮箱不存在（404），则清除本地缓存并创建新邮箱
-          if (response.status === 404) {
-            await handleMailboxNotFound();
-            onClose(); // 关闭邮件详情
-            return;
-          }
-          throw new Error('Failed to fetch email');
-        }
-        
-        const data = await response.json();
-        if (data.success) {
-          setEmail(data.email);
-          
-          // 如果邮件有附件，获取附件列表
-          if (data.email.hasAttachments) {
-            await fetchAttachments(emailId, data.email);
-          } else {
-            // 没有附件，将邮件添加到缓存
-            addToEmailCache(emailId, data.email, []);
-          }
-        } else {
-          throw new Error(data.error || 'Unknown error');
-        }
-      } catch (error) {
-        // fix: 使用全局通知函数
-        showErrorMessage(t('email.fetchFailed'));
-      } finally {
-        setIsLoading(false);
-      }
-    };
-    
-    fetchEmail();
-  }, [emailId, t, emailCache, addToEmailCache, handleMailboxNotFound, onClose, showErrorMessage]);
-  
-  const fetchAttachments = async (emailId: string, emailData?: Email) => {
+  const fetchAttachments = useCallback(async (targetEmailId: string, emailData?: Email) => {
     try {
       setIsLoadingAttachments(true);
-      const response = await fetch(`${API_BASE_URL}/api/emails/${emailId}/attachments`);
+      const response = await fetch(`${API_BASE_URL}/api/emails/${targetEmailId}/attachments`);
       
       if (!response.ok) {
         // 如果邮箱不存在（404），则清除本地缓存并创建新邮箱
@@ -98,7 +49,7 @@ const EmailDetail: React.FC<EmailDetailProps> = ({ emailId, onClose }) => {
         
         // 将邮件和附件添加到缓存
         if (emailData) {
-          addToEmailCache(emailId, emailData, data.attachments);
+          addToEmailCache(targetEmailId, emailData, data.attachments);
         }
       } else {
         throw new Error(data.error || 'Unknown error');
@@ -108,7 +59,51 @@ const EmailDetail: React.FC<EmailDetailProps> = ({ emailId, onClose }) => {
     } finally {
       setIsLoadingAttachments(false);
     }
-  };
+  }, [addToEmailCache, handleMailboxNotFound, onClose]);
+
+  useEffect(() => {
+    const fetchEmail = async () => {
+      try {
+        if (emailCache[emailId]) {
+          setEmail(emailCache[emailId].email);
+          setAttachments(emailCache[emailId].attachments);
+          setIsLoading(false);
+          return;
+        }
+
+        setIsLoading(true);
+        const response = await fetch(`${API_BASE_URL}/api/emails/${emailId}`);
+
+        if (!response.ok) {
+          if (response.status === 404) {
+            await handleMailboxNotFound();
+            onClose();
+            return;
+          }
+          throw new Error('Failed to fetch email');
+        }
+
+        const data = await response.json();
+        if (data.success) {
+          setEmail(data.email);
+
+          if (data.email.hasAttachments) {
+            await fetchAttachments(emailId, data.email);
+          } else {
+            addToEmailCache(emailId, data.email, []);
+          }
+        } else {
+          throw new Error(data.error || 'Unknown error');
+        }
+      } catch {
+        showErrorMessage(t('email.fetchFailed'));
+      } finally {
+        setIsLoading(false);
+      }
+    };
+
+    fetchEmail();
+  }, [emailId, t, emailCache, addToEmailCache, fetchAttachments, handleMailboxNotFound, onClose, showErrorMessage]);
   
   const handleDelete = async () => {
     try {
@@ -213,6 +208,7 @@ const EmailDetail: React.FC<EmailDetailProps> = ({ emailId, onClose }) => {
               controls 
               className="max-w-full max-h-[300px] rounded border"
             >
+              <track kind="captions" />
               {t('email.videoNotSupported')}
             </video>
           </div>
@@ -225,6 +221,7 @@ const EmailDetail: React.FC<EmailDetailProps> = ({ emailId, onClose }) => {
               controls 
               className="w-full"
             >
+              <track kind="captions" />
               {t('email.audioNotSupported')}
             </audio>
           </div>
@@ -245,11 +242,12 @@ const EmailDetail: React.FC<EmailDetailProps> = ({ emailId, onClose }) => {
   };
   
   return (
-    <div className="border rounded-lg p-6">
+    <div className="border rounded-lg shadow-sm p-6">
       {/* fix: 移除局部的错误和成功提示，使用全局通知 */}
       {isLoading ? (
-        <div className="flex items-center justify-center h-64">
+        <div className="flex flex-col items-center justify-center h-64">
           <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-primary"></div>
+          <p className="mt-2 text-sm text-muted-foreground">{t('common.loading')}...</p>
         </div>
       ) : email ? (
         <div className="space-y-6">
@@ -259,24 +257,28 @@ const EmailDetail: React.FC<EmailDetailProps> = ({ emailId, onClose }) => {
               <h2 className="text-xl font-semibold mb-2">
                 {email.subject || t('email.noSubject')}
               </h2>
-              <div className="text-sm text-muted-foreground">
-                <p><strong>{t('email.from')}:</strong> {email.fromAddress}</p>
-                <p><strong>{t('email.to')}:</strong> {email.toAddress}</p>
+              <div className="text-sm text-muted-foreground space-y-1">
+                <p className="truncate" title={email.fromAddress}><strong>{t('email.from')}:</strong> <span className="font-mono text-xs">{email.fromAddress}</span></p>
+                <p className="truncate" title={email.toAddress}><strong>{t('email.to')}:</strong> <span className="font-mono text-xs">{email.toAddress}</span></p>
                 <p><strong>{t('email.date')}:</strong> {formatDate(email.receivedAt)}</p>
               </div>
             </div>
             <div className="flex space-x-2">
               <button
+                type="button"
                 onClick={onClose}
-                className="p-2 rounded-md hover:bg-muted"
+                className="p-2 rounded-md hover:bg-muted focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary focus-visible:ring-offset-2"
                 title={t('common.close')}
+                aria-label={t('common.close')}
               >
                 <i className="fas fa-times"></i>
               </button>
               <button
+                type="button"
                 onClick={handleDelete}
-                className="p-2 rounded-md hover:bg-red-100 text-red-600"
+                className="p-2 rounded-md hover:bg-red-100 text-red-600 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-red-500 focus-visible:ring-offset-2"
                 title={t('common.delete')}
+                aria-label={t('common.delete')}
               >
                 <i className="fas fa-trash-alt"></i>
               </button>
@@ -284,18 +286,20 @@ const EmailDetail: React.FC<EmailDetailProps> = ({ emailId, onClose }) => {
           </div>
           
           {/* 分隔线 */}
-          <hr />
+          <div className="border-t" />
           
           {/* 邮件内容 */}
           <div>
             <h3 className="font-medium mb-2">{t('email.content')}</h3>
             {email.htmlContent ? (
-              <div 
-                className="prose max-w-none border rounded-md p-4 bg-white"
-                dangerouslySetInnerHTML={{ __html: email.htmlContent }}
+              <iframe
+                title={t('email.content')}
+                className="w-full min-h-[320px] border rounded-md bg-card"
+                srcDoc={email.htmlContent}
+                sandbox="allow-popups allow-popups-to-escape-sandbox"
               />
             ) : email.textContent ? (
-              <pre className="whitespace-pre-wrap border rounded-md p-4 bg-white font-sans">
+              <pre className="whitespace-pre-wrap border rounded-md p-4 bg-card font-sans">
                 {email.textContent}
               </pre>
             ) : (
@@ -318,7 +322,7 @@ const EmailDetail: React.FC<EmailDetailProps> = ({ emailId, onClose }) => {
               {attachments.length > 0 ? (
                 <div className="space-y-3">
                   {attachments.map(attachment => (
-                    <div key={attachment.id} className="border rounded-md p-3 bg-white">
+                    <div key={attachment.id} className="border rounded-md p-3 bg-card transition-colors duration-200 hover:bg-muted/40">
                       <div className="flex justify-between items-center">
                         <div className="flex items-center space-x-3">
                           <i className={`fas ${getFileIcon(attachment.mimeType)} text-primary text-lg`}></i>
@@ -330,9 +334,7 @@ const EmailDetail: React.FC<EmailDetailProps> = ({ emailId, onClose }) => {
                         <a 
                           href={getAttachmentUrl(attachment.id, true)}
                           download={attachment.filename}
-                          className="px-3 py-1 bg-primary text-primary-foreground rounded-md text-sm hover:bg-primary/90"
-                          target="_blank"
-                          rel="noopener noreferrer"
+                          className="px-3 py-1 bg-primary text-primary-foreground rounded-md text-sm hover:bg-primary/90 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary focus-visible:ring-offset-2"
                         >
                           {t('email.download')}
                         </a>

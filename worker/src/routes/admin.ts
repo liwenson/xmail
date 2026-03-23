@@ -2,7 +2,7 @@
  * 管理 API 路由
  */
 import { Hono } from 'hono';
-import { Env } from '../types';
+import { AppEnv } from '../types';
 import { 
   getAllUsers, 
   createUser, 
@@ -12,9 +12,9 @@ import {
   getAllMailboxes,
   getSystemStats 
 } from '../database';
-import { hashPassword, verifyPassword } from '../auth';
+import { hashPassword } from '../auth';
 
-const admin = new Hono<{ Bindings: Env }>();
+const admin = new Hono<AppEnv>();
 
 // 获取所有用户
 admin.get('/users', async (c) => {
@@ -83,10 +83,10 @@ admin.post('/users', async (c) => {
         createdAt: user.createdAt,
       }
     });
-  } catch (error: any) {
+  } catch (error: unknown) {
     console.error('创建用户失败:', error);
     
-    if (error.message?.includes('UNIQUE constraint failed')) {
+    if (error instanceof Error && error.message.includes('UNIQUE constraint failed')) {
       return c.json({ 
         success: false, 
         error: '用户名已存在' 
@@ -196,10 +196,10 @@ admin.put('/users/:id', async (c) => {
         updatedAt: updatedUser?.updatedAt,
       }
     });
-  } catch (error: any) {
+  } catch (error: unknown) {
     console.error('更新用户失败:', error);
     
-    if (error.message?.includes('UNIQUE constraint failed')) {
+    if (error instanceof Error && error.message.includes('UNIQUE constraint failed')) {
       return c.json({ 
         success: false, 
         error: '用户名已存在' 

@@ -4,33 +4,37 @@ import { getMailbox, saveEmail, saveAttachment } from './database';
 
 const PostalMime = PostalMimeModule.default;
 
+interface EmailAddressLike {
+  address: string;
+  name?: string;
+}
+
+interface EmailMessageLike {
+  raw: ReadableStream | ArrayBuffer | string;
+}
+
 /**
  * 处理接收到的邮件
  * @param message 邮件消息
  * @param env 环境变量
  */
-export async function handleEmail(message: any, env: Env): Promise<void> {
+export async function handleEmail(message: EmailMessageLike, env: Env): Promise<void> {
   try {
     const parser = new PostalMime();
     const email = await parser.parse(message.raw) as ParsedEmail;
 
-    console.log('邮件解析结果:', {
-      subject: email.subject,
-      from: email.from,
-      to: email.to,
-      hasHtml: !!email.html,
-      hasText: !!email.text,
-      attachmentsCount: email.attachments?.length || 0
-    });
+    const primaryRecipient = email.to[0] as EmailAddressLike | undefined;
+    if (!primaryRecipient?.address) {
+      throw new Error('收件地址无效');
+    }
 
     // 提取邮箱地址部分（从email.to获取 ）
-    const mailboxAddress = email.to[0].address.split('@')[0];
+    const mailboxAddress = primaryRecipient.address.split('@')[0];
     
     // 查找对应的邮箱
     const mailbox = await getMailbox(env.DB, mailboxAddress);
     
     if (!mailbox) {
-      console.log('邮箱不存在');
       throw new Error('邮箱不存在');
     }
 

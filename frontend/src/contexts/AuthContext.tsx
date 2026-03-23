@@ -125,6 +125,7 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
   // 检查认证状态（仅在 needsSetup 完成后）
   useEffect(() => {
     if (!needsSetup) {
+      setIsLoading(true);
       checkAuth();
     } else {
       setIsLoading(false);

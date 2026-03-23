@@ -8,7 +8,7 @@ interface ContainerProps {
 // 共享容器组件，确保一致的宽度
 const Container: React.FC<ContainerProps> = ({ children, className = '' }) => {
   return (
-    <div className={`max-w-6xl mx-auto px-4 w-full ${className}`}>
+    <div className={`max-w-6xl mx-auto px-4 sm:px-6 lg:px-8 w-full ${className}`}>
       {children}
     </div>
   );

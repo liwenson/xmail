@@ -4,24 +4,54 @@
 import { Hono } from 'hono';
 import { Env } from '../types';
 import { 
-  hasAdmin, 
   createUser, 
+  createMailbox,
   getUserByUsername, 
+  getUserMailboxCount,
+  getMailbox,
   createSession,
-  deleteSession,
-  getUserById 
+  isAdminInitialized,
+  markAdminInitialized
 } from '../database';
 import { hashPassword, verifyPassword, createJWT, getJWTSecret } from '../auth';
+import { generateRandomAddress } from '../utils';
 
 const auth = new Hono<{ Bindings: Env }>();
+
+async function ensureAnonymousMailboxExists(c: { env: Env; req: { header: (name: string) => string | undefined } }, userId: string): Promise<void> {
+  const mailboxCount = await getUserMailboxCount(c.env.DB, userId);
+  if (mailboxCount > 0) {
+    return;
+  }
+
+  const ipAddress = c.req.header('CF-Connecting-IP') || 'unknown';
+
+  for (let attempt = 0; attempt < 5; attempt++) {
+    const address = generateRandomAddress();
+    const existingMailbox = await getMailbox(c.env.DB, address);
+    if (existingMailbox) {
+      continue;
+    }
+
+    await createMailbox(c.env.DB, {
+      address,
+      expiresInHours: 24,
+      ipAddress,
+      userId,
+    });
+    return;
+  }
+
+  throw new Error('自动创建匿名邮箱失败');
+}
 
 // 检查是否需要初始化
 auth.get('/setup', async (c) => {
   try {
-    const adminExists = await hasAdmin(c.env.DB);
+    const adminInitialized = await isAdminInitialized(c.env.DB);
     return c.json({
       success: true,
-      needsSetup: !adminExists
+      needsSetup: !adminInitialized
     });
   } catch (error) {
     console.error('检查初始化状态失败:', error);
@@ -35,9 +65,9 @@ auth.get('/setup', async (c) => {
 // 初始化管理员
 auth.post('/setup', async (c) => {
   try {
-    // 检查是否已存在管理员
-    const adminExists = await hasAdmin(c.env.DB);
-    if (adminExists) {
+    // 检查是否已完成管理员初始化
+    const adminInitialized = await isAdminInitialized(c.env.DB);
+    if (adminInitialized) {
       return c.json({ 
         success: false, 
         error: '管理员已存在，无法重复创建' 
@@ -81,9 +111,11 @@ auth.post('/setup', async (c) => {
     // 创建管理员
     const passwordHash = await hashPassword(password);
     const user = await createUser(c.env.DB, username, passwordHash, 'admin');
+    await markAdminInitialized(c.env.DB);
     
     // 创建会话
-    const session = await createSession(c.env.DB, user.id);
+    await createSession(c.env.DB, user.id);
+    await ensureAnonymousMailboxExists(c, user.id);
     
     // 生成 JWT
     const secret = getJWTSecret(c.env);
@@ -144,7 +176,8 @@ auth.post('/login', async (c) => {
     }
     
     // 创建会话
-    const session = await createSession(c.env.DB, user.id);
+    await createSession(c.env.DB, user.id);
+    await ensureAnonymousMailboxExists(c, user.id);
     
     // 生成 JWT
     const secret = getJWTSecret(c.env);

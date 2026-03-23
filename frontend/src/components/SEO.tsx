@@ -50,7 +50,7 @@ const SEO: React.FC<SEOProps> = ({
     
     // 更新常规元标签
     Object.entries(metaTags).forEach(([name, content]) => {
-      let element = document.querySelector(`meta[name="${name}"]`);
+      const element = document.querySelector(`meta[name="${name}"]`);
       if (element) {
         element.setAttribute('content', content);
       }
@@ -58,7 +58,7 @@ const SEO: React.FC<SEOProps> = ({
     
     // 更新Open Graph标签
     Object.entries(ogTags).forEach(([property, content]) => {
-      let element = document.querySelector(`meta[property="${property}"]`);
+      const element = document.querySelector(`meta[property="${property}"]`);
       if (element) {
         element.setAttribute('content', content);
       }
@@ -66,14 +66,14 @@ const SEO: React.FC<SEOProps> = ({
     
     // 更新Twitter标签
     Object.entries(twitterTags).forEach(([property, content]) => {
-      let element = document.querySelector(`meta[property="${property}"]`);
+      const element = document.querySelector(`meta[property="${property}"]`);
       if (element) {
         element.setAttribute('content', content);
       }
     });
     
     // 更新规范链接
-    let canonicalLink = document.querySelector('link[rel="canonical"]');
+    const canonicalLink = document.querySelector('link[rel="canonical"]');
     if (canonicalLink) {
       canonicalLink.setAttribute('href', url);
     }

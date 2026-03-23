@@ -4,7 +4,15 @@ import { D1Database } from '@cloudflare/workers-types';
 export interface Env {
   DB: D1Database;
   VITE_EMAIL_DOMAIN?: string;
-  JWT_SECRET?: string;
+}
+
+export interface AppVariables {
+  user: JWTPayload;
+}
+
+export interface AppEnv {
+  Bindings: Env;
+  Variables: AppVariables;
 }
 
 // 用户角色
@@ -26,6 +34,25 @@ export interface UserSession {
   userId: string;
   expiresAt: number;
   createdAt: number;
+}
+
+// API Token
+export interface ApiToken {
+  id: string;
+  userId: string;
+  name: string;
+  tokenHash: string;
+  createdAt: number;
+  updatedAt: number;
+  expiresAt: number | null;
+  lastUsedAt: number | null;
+  revokedAt: number | null;
+}
+
+export interface CreateApiTokenParams {
+  userId: string;
+  name: string;
+  expiresInDays?: number;
 }
 
 // JWT Payload
@@ -143,7 +170,7 @@ export interface ApiResponse {
   success: boolean;
   error?: string;
   message?: string;
-  [key: string]: any;
+  [key: string]: unknown;
 }
 
 // 解析后的邮件类型

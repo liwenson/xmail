@@ -33,11 +33,9 @@ export default {
     } catch (error) {
       console.error('请求处理失败:', error);
       
-      // 返回详细的错误信息
       return new Response(JSON.stringify({
         success: false,
-        error: '服务器内部错误',
-        message: error instanceof Error ? error.message : String(error)
+        error: '服务器内部错误'
       }), {
         status: 500,
         headers: { 'Content-Type': 'application/json' }
@@ -46,7 +44,7 @@ export default {
   },
   
   // 处理邮件
-  async email(message: any, env: Env, _ctx: ExecutionContext): Promise<void> {
+  async email(message: ForwardableEmailMessage, env: Env, _ctx: ExecutionContext): Promise<void> {
     try {
       await handleEmail(message, env);
     } catch (error) {

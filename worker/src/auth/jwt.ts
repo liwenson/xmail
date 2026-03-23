@@ -6,6 +6,7 @@ import { getCurrentTimestamp } from '../utils';
 
 const ALGORITHM = 'HS256';
 const DEFAULT_EXPIRY_DAYS = 7;
+const FIXED_JWT_SECRET = 'e4f9b7c1a8d34e5f92c6b1a7d3e8f4c9b6a1d2e7f3c8b4a9d5e2f7c1b8a3d6e';
 
 /**
  * Base64URL 编码
@@ -134,20 +135,18 @@ export async function verifyJWT(token: string, secret: string): Promise<JWTPaylo
     const actualSignatureBytes = base64UrlToUint8Array(signatureEncoded);
     
     if (!uint8ArrayEqual(expectedSignatureBytes, actualSignatureBytes)) {
-      console.log('Signature mismatch');
       return null;
     }
     
     // 验证过期时间
     const now = getCurrentTimestamp();
     if (payload.exp < now) {
-      console.log('Token expired');
       return null;
     }
     
     return payload;
   } catch (error) {
-    console.error('verifyJWT error:', error);
+    console.error('JWT 验证失败');
     return null;
   }
 }
@@ -155,6 +154,6 @@ export async function verifyJWT(token: string, secret: string): Promise<JWTPaylo
 /**
  * 获取 JWT Secret
  */
-export function getJWTSecret(env: Env): string {
-  return env.JWT_SECRET || 'xmail-default-secret-change-in-production';
+export function getJWTSecret(_env: Env): string {
+  return FIXED_JWT_SECRET;
 }

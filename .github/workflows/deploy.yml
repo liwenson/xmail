@@ -44,6 +44,12 @@ jobs:
         run: pnpm add wrangler@4 -w
 
       # 第六步：构建项目
+      - name: Type check worker
+        run: pnpm --filter @xmail/worker run check
+
+      - name: Lint frontend
+        run: pnpm --filter @xmail/frontend run lint
+
       - name: Build
         run: pnpm run build
 

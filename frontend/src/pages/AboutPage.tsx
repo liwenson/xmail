@@ -40,21 +40,6 @@ const AboutPage: React.FC = () => {
           <li><strong>{t('about.tech.storage.title')}</strong>：{t('about.tech.storage.desc')}</li>
         </ul>
         
-        <h2 className="text-xl font-semibold mt-8 mb-2">{t('about.opensource.title')}</h2>
-        <p>{t('about.opensource.intro')}</p>
-        <ul>
-          <li><strong>{t('about.opensource.github.title')}</strong>：<a href="https://github.com/zaunist/xmail" className="text-blue-600 hover:underline">https://github.com/zaunist/xmail</a></li>
-          <li><strong>{t('about.opensource.license.title')}</strong>：{t('about.opensource.license.desc')}</li>
-          <li><strong>{t('about.opensource.contribute.title')}</strong>：{t('about.opensource.contribute.desc')}</li>
-        </ul>
-        
-        <h2 className="text-xl font-semibold mt-8 mb-2">{t('about.contact.title')}</h2>
-        <p>{t('about.contact.intro')}</p>
-        <ul>
-          <li><strong>{t('about.contact.github.title')}</strong>：{t('about.contact.github.desc')}</li>
-          <li><strong>{t('about.contact.email.title')}</strong>：y.bz@foxmail.com</li>
-        </ul>
-        
         <p className="text-center mt-10">{t('about.conclusion')}</p>
       </div>
     </Container>

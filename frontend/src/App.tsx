@@ -9,25 +9,7 @@ import NotFoundPage from './pages/NotFoundPage';
 import LoginPage from './pages/LoginPage';
 import SetupPage from './pages/SetupPage';
 import AdminPage from './pages/AdminPage';
-
-// 需要认证的路由组件
-const RequireAuth: React.FC<{ children: React.ReactNode }> = ({ children }) => {
-  const { isAuthenticated, isLoading } = useAuth();
-
-  if (isLoading) {
-    return (
-      <div className="min-h-screen flex items-center justify-center bg-background">
-        <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-primary"></div>
-      </div>
-    );
-  }
-
-  if (!isAuthenticated) {
-    return <Navigate to="/login" replace />;
-  }
-
-  return <>{children}</>;
-};
+import TokensPage from './pages/TokensPage';
 
 // 需要管理员权限的路由组件
 const RequireAdmin: React.FC<{ children: React.ReactNode }> = ({ children }) => {
@@ -101,6 +83,7 @@ const AppRoutes: React.FC = () => {
             </RequireAdmin>
           }
         />
+        <Route path="tokens" element={<TokensPage />} />
         <Route path="*" element={<NotFoundPage />} />
       </Route>
 

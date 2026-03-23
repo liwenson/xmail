@@ -1,6 +1,5 @@
-import React, { useContext, useState } from 'react'; // 导入 useState
-import { Outlet, useLocation } from 'react-router-dom';
-import { useTranslation } from 'react-i18next';
+import React, { useContext, useState } from 'react';
+import { Outlet } from 'react-router-dom';
 import Header from './Header';
 import Footer from './Footer';
 import SEO from './SEO';
@@ -8,9 +7,7 @@ import { MailboxContext } from '../contexts/MailboxContext';
 import InfoModal from './InfoModal'; // 导入弹窗组件
 
 const Layout: React.FC = () => {
-  const { t } = useTranslation();
   const { currentMailbox: mailbox, setCurrentMailbox: setMailbox, isLoading } = useContext(MailboxContext);
-  const location = useLocation();
   
   // 添加状态来管理弹窗的显示和内容
   const [infoModal, setInfoModal] = useState<{
@@ -30,8 +27,6 @@ const Layout: React.FC = () => {
   
   // 根据当前路径设置不同的SEO信息
   const getSEOProps = () => {
-    const path = location.pathname;
-    
     // 默认SEO属性
     const defaultProps = {
       title: 'XMAIL-24小时匿名邮箱',
@@ -59,7 +54,7 @@ const Layout: React.FC = () => {
         onMailboxChange={setMailbox} 
         isLoading={isLoading}
       />
-      <main className="flex-1 py-6">
+      <main className="flex-1 py-8">
         <Outlet />
       </main>
       {/* 传递 onShowInfo 函数给 Footer 组件 */}

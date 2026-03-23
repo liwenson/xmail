@@ -15,7 +15,7 @@ export const useAuth = () => {
   const login = async (username: string, password: string) => {
     const result = await apiLogin(username, password);
     if (result.success) {
-      context.checkAuth();
+      await context.checkAuth();
     }
     return result;
   };
@@ -28,7 +28,7 @@ export const useAuth = () => {
   const setupAdmin = async (username: string, password: string) => {
     const result = await apiSetupAdmin(username, password);
     if (result.success) {
-      context.checkAuth();
+      await context.checkAuth();
     }
     return result;
   };

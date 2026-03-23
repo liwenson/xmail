@@ -389,6 +389,83 @@ export const getSystemStats = async () => {
   }
 };
 
+export interface ApiTokenItem {
+  id: string;
+  creatorUserId: string;
+  creatorUsername: string;
+  name: string;
+  createdAt: number;
+  expiresAt: number | null;
+  lastUsedAt: number | null;
+  revokedAt: number | null;
+  isActive: boolean;
+}
+
+export const createApiToken = async (name: string, expiresInDays?: number) => {
+  try {
+    const response = await fetch(apiUrl('/api/auth/protected/tokens'), {
+      method: 'POST',
+      headers: getAuthHeaders(),
+      body: JSON.stringify({ name, expiresInDays }),
+    });
+
+    const data = await response.json();
+
+    if (data.success) {
+      return {
+        success: true,
+        token: data.token as string,
+        apiToken: data.apiToken as Omit<ApiTokenItem, 'isActive' | 'revokedAt'>,
+        usage: data.usage as string,
+      };
+    }
+
+    return { success: false, error: data.error as string | undefined };
+  } catch (error) {
+    console.error('创建 API Token 失败:', error);
+    return { success: false, error };
+  }
+};
+
+export const getApiTokens = async () => {
+  try {
+    const response = await fetch(apiUrl('/api/auth/protected/tokens'), {
+      headers: getAuthHeaders(),
+    });
+
+    const data = await response.json();
+
+    if (data.success) {
+      return { success: true, tokens: data.tokens as ApiTokenItem[] };
+    }
+
+    return { success: false, error: data.error as string | undefined };
+  } catch (error) {
+    console.error('获取 API Token 列表失败:', error);
+    return { success: false, error };
+  }
+};
+
+export const revokeApiToken = async (id: string) => {
+  try {
+    const response = await fetch(apiUrl(`/api/auth/protected/tokens/${id}`), {
+      method: 'DELETE',
+      headers: getAuthHeaders(),
+    });
+
+    const data = await response.json();
+
+    if (data.success) {
+      return { success: true };
+    }
+
+    return { success: false, error: data.error as string | undefined };
+  } catch (error) {
+    console.error('吊销 API Token 失败:', error);
+    return { success: false, error };
+  }
+};
+
 // 获取所有邮箱（管理员）
 export const getAllMailboxesAdmin = async () => {
   try {
